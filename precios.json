@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "generado": "2026-08-04T15:57:43Z",
+  "generado": "2026-08-04T15:59:08Z",
   "cierreDe": "2026-08-04",
   "monedaBase": "EUR",
   "fx": {
-    "USD": 0.8675,
-    "GBP": 1.1668,
+    "USD": 0.8673,
+    "GBP": 1.1669,
     "fecha": "2026-08-04"
   },
   "precios": {
