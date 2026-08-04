@@ -1,0 +1,54 @@
+name: precios
+
+# 05:10 UTC de lunes a sábado. El sábado recoge el cierre del viernes; domingos y festivos
+# producirían `stale` legítimo, así que no se ejecuta. Ver ARQUITECTURA (b), regla 6.
+on:
+  schedule:
+    - cron: '10 5 * * 1-6'
+  workflow_dispatch:
+    inputs:
+      desde:
+        description: 'Backfill: primer mes (YYYY-MM). Vacío = solo el mes recién cerrado.'
+        required: false
+      hasta:
+        description: 'Backfill: último mes (YYYY-MM).'
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: precios
+  cancel-in-progress: false
+
+jobs:
+  generar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generar precios.json
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.desde }}" ] && [ -n "${{ inputs.hasta }}" ]; then
+            ARGS="--desde ${{ inputs.desde }} --hasta ${{ inputs.hasta }}"
+          fi
+          node workflow/generar-precios.js --tickers workflow/tickers.json --salida precios.json $ARGS
+
+      # El script ya sale sin escribir si no cambió nada, así que este `git diff --quiet`
+      # es la segunda red: no ensuciar el historial con un commit diario idéntico.
+      - name: Commit si algo cambió
+        run: |
+          if git diff --quiet -- precios.json; then
+            echo "sin cambios en precios.json"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add precios.json
+          git commit -m "precios: cierre de $(node -e "console.log(require('./precios.json').cierreDe)")"
+          git push
