@@ -92,6 +92,8 @@ section{display:none} section.on{display:block}
 .row .pct span{font-size:12px;color:var(--mute);width:12px}
 .row .eu{width:92px;text-align:right;font-size:15px;font-weight:700;font-variant-numeric:tabular-nums}
 .alerta{padding:0 16px 14px;font-size:12px;color:var(--error);font-weight:700}
+.row .nm small.mal{color:var(--error);font-weight:700;margin-top:3px}
+.fr .nm small.mal{color:var(--error);font-weight:700}
 .chapter{background:var(--surface-dark);color:var(--on-dark);margin-top:28px;padding:28px 16px}
 .chapter .tag{display:inline-block;background:var(--error);color:#fff;font-size:11px;font-weight:700;
               text-transform:uppercase;padding:6px 10px;border-radius:var(--r);margin-bottom:18px}
@@ -349,7 +351,8 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 
   <div class="chapter">
     <div class="tt">Desde el origen</div>
-    <div class="ss">Lo que has puesto tú frente a lo que ha puesto el mercado.</div>
+    <div class="ss">La columna grande es <b>lo que ha puesto el mercado</b>: no se mueve porque
+      compres más. Lo que pones tú va debajo del nombre.</div>
     <div id="pRend"></div>
     <div class="foot">Lo aportado suma lo que conviertes en la app; el valor va a los precios de la
       cabecera. Acumulado, no anualizado: buena parte del dinero entró mucho después del origen.</div>
@@ -658,10 +661,14 @@ function rMes(){
 
   const hechos = S.mov.filter(x=>x.u!==null);
   $('mHechoTit').hidden = !hechos.length;
-  $('mHecho').innerHTML = hechos.length ? '<div class="card">'+hechos.map(v =>
-    `<div class="row"><span class="nm">${v.activo}<small>${eur(v.eur)} · ${v.f}</small></span>
+  $('mHecho').innerHTML = hechos.length ? '<div class="card">'+hechos.map(v => {
+    const d = desajuste(v);
+    return `<div class="row"><span class="nm">${v.activo}<small>${eur(v.eur)} · ${v.f}${
+        v.px?` · a ${eur(v.px)} la unidad`:''}</small>${d?`<small class="mal">⚠ la app la valora a
+        ${eur(d.px)}: ${(d.d>0?'pagaste':'te salió')} un ${Math.abs(d.d*100).toFixed(1)} %
+        ${d.d>0?'más':'menos'}. Revisa las unidades: eso no es ganancia ni pérdida.</small>`:''}</span>
       <span class="eu num">${v.u?uds(v.u):raya}</span>
-      <button class="x est" data-del="${v.id}">✕</button></div>`).join('')+'</div>' : '';
+      <button class="x est" data-del="${v.id}">✕</button></div>`; }).join('')+'</div>' : '';
 }
 
 /* ════════════ RENDER · PATRIMONIO ════════════ */
@@ -860,18 +867,22 @@ function rInv(){
      <div class="fr"><span class="nm">Vale<small>a ${fHoy}, con los precios de arriba</small></span>
        <span class="n num">${eur0(tv)+mk}</span></div>
      <div class="fr"><span class="nm">Ganancia<small>${ta>0?(g/ta*100).toFixed(1)+' % sobre lo invertido':''}</small></span>
-       <span class="n num ${g>=0?'up':'dn'}">${(g>=0?'+':'')+eur0(g)+mk}</span></div>`;
+       <span class="n num ${g>=0?'up':'dn'}">${(g>=0?'+':'')+eur0(g)+mk}</span></div>`
+    + (S.mov.filter(desajuste).length ? `<div class="fr"><span class="nm">Cuidado
+       <small class="mal">Hay ${S.mov.filter(desajuste).length} compra(s) cuyo precio por unidad
+       no cuadra con el que usa la app. Eso sale aquí como ganancia o pérdida sin serlo:
+       revísalas en Mes → Convertido.</small></span><span class="n na">⚠</span></div>` : '');
   let r='';
   pares.forEach(([n,k]) => { const o=O[k];
     if (o.val===null){
       r += `<div class="l"><span>${n}<br><span style="font-size:11px">desde ${o.desde||'—'} · ${eur0(o.ap)} aportados</span></span>
         <b class="num">—</b><span class="pc" style="color:var(--on-dark-mute)">sin precio</span></div>`; return; }
     const gg=o.val-o.ap, p=o.ap>0?gg/o.ap*100:null;
-    r += `<div class="l"><span>${n}<br><span style="font-size:11px">desde ${o.desde||'—'} · ${eur0(o.ap)} aportados</span></span>
-      <b class="num">${eur0(o.val)}</b>
+    r += `<div class="l"><span>${n}<br><span style="font-size:11px">${eur0(o.ap)} puestos desde ${o.desde||'que usas la app'} · vale ${eur0(o.val)}</span></span>
+      <b class="num">${(gg>=0?'+':'')+eur0(gg)}</b>
       <span class="pc ${p!==null&&p<0?'neg':''}">${p===null?'—':(p>=0?'+':'')+p.toFixed(1)+' %'}</span></div>`; });
   // el remate: la ganancia total, grande y en verde, como en el diseño original
-  r += `<div class="l big"><span>Total<br><span style="font-size:11px;font-weight:400">${eur0(ta)} aportados</span></span>
+  r += `<div class="l big"><span>Total<br><span style="font-size:11px;font-weight:400">${eur0(ta)} puestos por ti</span></span>
       <b class="num">${(g>=0?'+':'')+eur0(g)+mk}</b>
       <span class="pc ${g<0?'neg':''}">${ta>0?(g>=0?'+':'')+(g/ta*100).toFixed(1)+' %':'—'}</span></div>`;
   $('pRend').innerHTML = r;
@@ -913,7 +924,88 @@ function rAnual(){
   }).join('');
 }
 
-/* ════════════ RENDER · EVOLUCIÓN (serie histórica estática) ════════════ */
+/* ════════════ LO QUE PASÓ DESPUÉS DEL CORTE ════════════
+   Las series del import acaban en su fecha de corte; la app tiene que saber
+   contar sola lo que ha pasado desde entonces. Estas fórmulas dicen cuánto
+   vale HOY cada rama, y están comprobadas una a una contra el último punto de
+   la serie importada: mismo contenido, mismo número (06/08/2026). Lo que no
+   sé calcular devuelve null y entonces la serie se queda como estaba: una
+   rama que da un salto falso es peor que una rama que no llega a hoy. */
+const CLAVE_ACT = {'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc',
+                   'Ethereum':'eth','ETF oro físico':'oroU'};
+// a qué ramas de Evolución alimenta cada activo
+const RAMAS_DE = {world:['world','rv','invertido'], nasdaq:['nasdaq','rv','invertido'],
+                  btc:['btc','cri','invertido'], eth:['eth','cri','invertido'],
+                  oroU:['oro','invertido'], fin:['fin','invertido'], pens:['pens','invertido']};
+function vivoDe(id){
+  const p = k => { const x = precioDe(k); return x===null ? null : S.pos[k].u*x; };
+  const suma = (...ks) => { let s=0; for (const k of ks){ const v=p(k); if(v===null) return null; s+=v; } return s; };
+  switch(id){
+    case 'rf':   return S.cuentaTR.comp.rf;
+    case 'fe':   return S.cuentaTR.comp.fe;
+    case 'liq':  return S.cuentaTR.comp.liq + S.cuentaTR.comp.yolo + S.cuentaTR.comp.oro;
+    case 'fin':  return S.mano.fin.eur;
+    case 'pens': return S.mano.pens.eur;
+    case 'world':return p('world');
+    case 'nasdaq':return p('nasdaq');
+    case 'rv':   return suma('world','nasdaq');
+    case 'btc':  return p('btc');
+    case 'eth':  return suma('eth','steth');        // stETH es Ethereum, con feed propio
+    case 'cri':  return suma('btc','eth','steth');
+    case 'oro':  return p('oroU');
+    case 'invertido': { const ps = ['rv','fin','cri','oro','pens'].map(vivoDe);
+      return ps.some(v=>v===null) ? null : ps.reduce((a,b)=>a+b,0); }
+    case 'int': {                                    // intereses: los alimenta el campo de Mes
+      const l = D.largo && D.largo.int; if (!l) return null;
+      let v = l.saldo[l.saldo.length-1]; const ult = l.meses[l.meses.length-1];
+      Object.entries(S.meses).forEach(([ym,m]) => { if (ym > ult && m.intTR) v += m.intTR; });
+      return v; }
+  }
+  return null;
+}
+// lo aportado a esa rama en ese mes: conversiones hechas en la app + el plan
+function apDe(id, ym){
+  let s = 0;
+  S.mov.forEach(v => { if (v.u===null || v.traspaso || v.f.slice(0,7)!==ym) return;
+    const k = v.activo==='Finizens' ? 'fin' : CLAVE_ACT[v.activo];
+    if (k && (RAMAS_DE[k]||[]).includes(id)) s += v.eur; });
+  const m = S.meses[ym] && S.meses[ym].aplicado;
+  if (m){
+    if (id==='pens'||id==='invertido') s += m.pens || 0;
+    if (id==='rf') s += m.rf || 0;
+    if (id==='fe') s += m.fe || 0;
+    if (id==='liq') s += (m.liq||0) + (m.yolo||0) + (m.oro||0);
+  }
+  return s;
+}
+// añade (o sustituye) el punto del mes en curso al final de una serie
+function conHoy(s, id){
+  const v = vivoDe(id);
+  if (v===null || !s.meses || !s.meses.length) return s;
+  const ym = HOY.slice(0,7);
+  if (s.meses[s.meses.length-1] > ym) return s;      // la serie ya va por delante
+  const meses=[...s.meses], saldo=[...s.saldo], ap=[...(s.ap||[])], mk=[...(s.mk||[])];
+  let apPrevio = 0;
+  if (meses[meses.length-1] === ym){ meses.pop(); saldo.pop(); apPrevio = ap.pop() || 0; mk.pop(); }
+  const aport = apPrevio + apDe(id, ym);
+  meses.push(ym); saldo.push(v); ap.push(aport);
+  mk.push(v - saldo[saldo.length-2] - aport);
+  return {...s, meses, saldo, ap, mk, vivo:true};
+}
+// Un desajuste entre lo que pagaste por unidad y lo que la app cree que vale esa
+// unidad NO es un rendimiento: es que uno de los dos datos está mal. Sin esto,
+// convertir una compra estrenaba una ganancia instantánea (visto el 06/08/2026:
+// una compra de oro salía +20 % el mismo día de comprarla).
+function desajuste(v){
+  const k = CLAVE_ACT[v.activo];
+  if (!k || !v.px || !isFinite(v.px)) return null;
+  const px = precioDe(k);
+  if (px === null) return null;
+  const d = v.px/px - 1;
+  return Math.abs(d) > 0.03 ? {d, px, pagado:v.px} : null;
+}
+
+/* ════════════ RENDER · EVOLUCIÓN (histórico del import + lo de hoy) ════════════ */
 const RAMAS = [
   {id:'total', n:'Patrimonio total'},
   {id:'invertido', n:'Cartera invertida', tipo:'cotiza'},
@@ -948,8 +1040,10 @@ function eSerie(){
             ap:f.map(()=>null), mk:f.map(()=>null)};
   }
   const largo = D.largo && D.largo[eSel], corta = D.series[eSel];
-  if (largo && (ePer===0 || !corta)) return {...largo, recon:true};
-  return {meses:D.meses, ...corta};
+  const base = (largo && (ePer===0 || !corta)) ? {...largo, recon:true}
+             : corta ? {meses:D.meses, ...corta} : null;
+  if (!base) return {meses:[], saldo:[], ap:[], mk:[]};
+  return conHoy(base, eSel);        // el histórico llega hasta el corte; el resto lo pone la app
 }
 function rEvo(){
   // sin histórico importado no hay nada que dibujar, y se dice
@@ -1038,8 +1132,12 @@ function rEvo(){
           : `desde ${o.desde||'el primer apunte'} · <b>${(gan/o.ap*100).toFixed(1)} %${o.meses?` en ${o.meses} meses`:''}</b>`)
         : 'no hay fecha de inicio conocida'}</div></div>`;
   $('ePie').innerHTML = eSel==='total'
-    ? 'Esta cifra es <b>el último saldo declarado</b> (jul-26). La pestaña Patrimonio valora con los precios del momento; pueden diferir sin que ninguna esté mal.'
-    : '';
+    ? `Esta cifra es <b>tu última foto</b> (${et(ms[ms.length-1])}). Hazte una en Fotos para
+       mover esta curva: aquí no valen los precios del momento, valen las fotos.`
+    : s.vivo
+      ? `El último punto es de <b>hoy</b>: lo que valen ahora tus unidades, con los precios de la
+         cabecera. Los meses anteriores son cierres de mes del histórico.`
+      : '';
 }
 
 /* ════════════ RENDER · FOTOS ════════════ */
@@ -1150,7 +1248,7 @@ document.addEventListener('click', e => {
     } else if (c.libre){ if(!a) return; v.activo=a; v.u=(isFinite(u)&&u>0)?u:0;
       // yolo con unidades no cotiza: se queda en planos contado en euros
     } else { if(!(isFinite(u)&&u>0)) return;
-      v.activo=a; v.u=u;
+      v.activo=a; v.u=u; v.px=v.eur/u;      // lo que pagaste por unidad: se guarda para poder comparar
       // CONVERSIÓN: los euros planos dejan de existir, nacen unidades
       S.planos[v.cat] -= v.eur;
       const clave={'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'}[a];
