@@ -1,0 +1,35 @@
+name: pages
+
+# Publica la app en GitHub Pages por Actions. Sustituye a la construcción «legacy»
+# por rama, que el 06/08/2026 se quedó atascada en su cola y dejó tres versiones
+# sin publicar sin dar ningún error útil: el build salía bien y el despliegue
+# expiraba en silencio.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Si llegan dos pushes seguidos, que gane el último y no se pisen.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  desplegar:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+      - id: despliegue
+        uses: actions/deploy-pages@v4
