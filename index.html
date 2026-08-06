@@ -155,6 +155,7 @@ section{display:none} section.on{display:block}
 .fr .nm small b.sup{color:var(--primary-dark)} .fr .nm small b.sdn{color:var(--error)}
 .fr .n{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums;min-width:74px;text-align:right}
 .fr .n.up{color:var(--primary-dark)} .fr .n.dn{color:var(--error)} .fr .n.na{color:var(--ash)}
+.fr.tot{border-top:2px solid var(--ink)} .fr.tot .nm{font-weight:700} .fr.tot .n{font-size:19px}
 button.fr{cursor:pointer;font:inherit}
 .fr .chd{width:12px;color:var(--mute);font-size:11px;font-weight:700}
 .ver{font-size:11px;font-weight:700;text-transform:uppercase;padding:6px 8px;border-radius:var(--r);
@@ -212,7 +213,6 @@ button.fr{cursor:pointer;font:inherit}
 .cab .d .up{color:var(--primary-dark);font-weight:700} .cab .d .dn{color:var(--error);font-weight:700}
 #g{display:block;width:100%;height:200px;margin-top:12px;touch-action:none}
 .gx{font-size:10px;fill:var(--mute)}
-.cab .v.scrub{color:var(--primary-dark)}
 .cab .d .fecha{font-weight:700;color:var(--ink)}
 .dos{display:flex;margin:16px 16px 0;border:1px solid var(--hairline);border-radius:var(--r)}
 .dos>div{flex:1;padding:12px 14px}
@@ -333,6 +333,12 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
   <div class="card" id="pArbol"></div>
   <div class="note">● precio de mercado · <span style="color:var(--warning)">●</span> tecleado a mano ·
     <span style="color:var(--hairline)">●</span> líquido esperando</div>
+
+  <div class="eyebrow">En Trade Republic</div>
+  <div class="card" id="pTR"></div>
+  <div class="note">Para cuadrar con la app de TR: su efectivo debe coincidir con <b>Efectivo</b>,
+    y su total con <b>Todo lo que hay en TR</b>. El plan de pensiones no sale aquí: sus 125 €
+    van del banco al plan sin pasar por Trade Republic. Finizens y Binance tampoco viven en TR.</div>
 
   <div class="eyebrow">Patrimonio invertido</div>
   <div class="card" id="pInv"></div>
@@ -753,7 +759,36 @@ function rPat(){
     <span class="nm">Sin asignar<small>saldo real de la cuenta menos la suma de bolsillos</small></span>
     <span class="eu num">${eur(P.sinAsignar)}</span></div>`;
   $('pArbol').innerHTML = html;
-  rInv(); rIpc(); rAnual();
+  rTR(); rInv(); rIpc(); rAnual();
+}
+
+/* ── En Trade Republic: el corte por broker, no por papel ──
+   El árbol de arriba agrupa por PARA QUÉ es el dinero; esta tarjeta agrupa por
+   DÓNDE está, que es lo único que se puede cuadrar contra la app de TR. El
+   efectivo es el saldo entero de la cuenta remunerada; el plan de pensiones no
+   aparece porque nunca pasa por TR (sale del banco directo al plan). */
+function rTR(){
+  const c = S.cuentaTR.comp, P = patrimonio();
+  const filas = [
+    {n:'Renta fija', s:'el bolsillo del piso', v:c.rf},
+    {n:'Fondo de emergencia', v:c.fe},
+    {n:'Liquidez', v:c.liq},
+    {n:'Yolo', v:c.yolo},
+    {n:'Por invertir', s:'bolsillos de RV, cripto y oro esperando', v:c.rv+c.cri+c.oro},
+  ];
+  if (Math.abs(P.sinAsignar) > 0.005)
+    filas.push({n:'Sin asignar', s:'saldo real menos bolsillos', v:P.sinAsignar});
+  let posTR = 0;
+  ['world','nasdaq','oroU'].forEach(k => { posTR += S.pos[k].u * (precioDe(k) ?? 0); });
+  $('pTR').innerHTML = filas.map(f =>
+    `<div class="fr"><span class="nm">${f.n}${f.s?`<small>${f.s}</small>`:''}</span>
+       <span class="n num">${eur(f.v)}</span></div>`).join('')
+    + `<div class="fr tot"><span class="nm">Efectivo<small>el saldo de la cuenta remunerada, al 2 %</small></span>
+       <span class="n num">${eur(S.cuentaTR.saldo)}</span></div>`
+    + `<div class="fr"><span class="nm">Posiciones que cotizan en TR<small>World, Nasdaq y el oro, a precio de mercado</small></span>
+       <span class="n num">${eur(posTR)}</span></div>`
+    + `<div class="fr tot"><span class="nm">Todo lo que hay en TR</span>
+       <span class="n num">${eur(S.cuentaTR.saldo + posTR)}</span></div>`;
 }
 
 /* ── bloques analíticos: invertido, origen, IPC, año a año ─────────────── */
@@ -882,17 +917,17 @@ function rEvo(){
   // el dedo puede estar posado sobre un mes: entonces manda ese, no el último
   GRAF = {ms, sa, X, W, P};
   const foco = (scrub !== null && scrub < ms.length) ? scrub : ms.length-1;
+  // El número grande es un valor histórico: va en tinta, sin color. Y la
+  // comparación es doble: contra el mes anterior (¿ahí subió o bajó?) y contra
+  // el arranque del periodo elegido. Antes solo estaba la segunda, que en
+  // «Todo» sale positiva siempre: un verde perpetuo que no decía nada.
   $('eValor').textContent = eur(sa[foco]);
-  $('eValor').classList.toggle('scrub', scrub !== null);
-  if (scrub !== null){
-    const dd = sa[foco]-sa[0];
-    $('eDelta').innerHTML = `<span class="fecha">${et(ms[foco])}</span> · desde ${et(ms[0])}:
-      <span class="${dd>=0?'up':'dn'}">${dd>=0?'+':''}${eur0(dd)}</span>`;
-  } else {
-    const d = sa[sa.length-1]-sa[0];
-    $('eDelta').innerHTML = `a ${et(ms[ms.length-1])} · desde ${et(ms[0])}:
-      <span class="${d>=0?'up':'dn'}">${d>=0?'+':''}${eur0(d)}</span>`;
-  }
+  const prevIdx = i0 + foco - 1;                    // mes anterior en la serie completa
+  const dif = v => `<span class="${v>=0?'up':'dn'}">${v>=0?'+':''}${eur0(v)}</span>`;
+  const partes = [scrub !== null ? `<span class="fecha">${et(ms[foco])}</span>` : `a ${et(ms[foco])}`];
+  if (prevIdx >= 0) partes.push(`vs ${et(s.meses[prevIdx])}: ${dif(sa[foco]-s.saldo[prevIdx])}`);
+  if (foco > 0) partes.push(`desde ${et(ms[0])}: ${dif(sa[foco]-sa[0])}`);
+  $('eDelta').innerHTML = partes.join(' · ');
   let path='',pts='',ejes='';
   ms.forEach((m,i)=>{
     const hueco = r.huecos && r.huecos.includes(m);
@@ -1186,6 +1221,13 @@ window.__checks = function(){
   const desc = S.config.cats.filter(c => !c.acumula &&
     Math.abs(pendiente(c) - Math.max(S.cuentaTR.comp[c.id],0)) > 0.005).map(c => c.n);
   ok('pendiente = bolsillo, sin restar dos veces', !desc.length, desc.join(', ') || 'las 5 cuadran');
+  // 8 · el bloque «En Trade Republic»: los componentes suman el efectivo, el
+  //     efectivo es el saldo, y efectivo + posiciones = todo lo que hay en TR
+  const tr = [...document.querySelectorAll('#pTR .fr .n')].map(x=>parseFloat(x.textContent.replace(/\./g,'').replace(',','.')));
+  const trTodo = tr.pop(), trPos = tr.pop(), trEf = tr.pop();
+  ok('TR: componentes = efectivo = saldo, y efectivo+posiciones = todo',
+     Math.abs(tr.reduce((a,b)=>a+b,0)-trEf)<0.03 && Math.abs(trEf-S.cuentaTR.saldo)<0.005
+     && Math.abs(trEf+trPos-trTodo)<0.03, eur(trEf));
   return out.join('\n');
 };
 
