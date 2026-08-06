@@ -809,14 +809,21 @@ const et = ym => MESC[ym.slice(5)]+'-'+ym.slice(2,4);
 let eSel='total', ePer=0;
 $('eQue').innerHTML = RAMAS.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
 function eSerie(){
+  // «Patrimonio total» se construye desde LAS FOTOS, que son su única fuente:
+  // así, al hacer una foto la curva crece en el acto. Antes leía un array
+  // congelado del import y las fotos nuevas no aparecían nunca.
+  if (eSel==='total'){
+    const f = [...S.fotos].sort((a,b)=>a.f<b.f?-1:1);
+    return {meses:f.map(x=>x.f.slice(0,7)), saldo:f.map(x=>x.v),
+            ap:f.map(()=>null), mk:f.map(()=>null)};
+  }
   const largo = D.largo && D.largo[eSel], corta = D.series[eSel];
   if (largo && (ePer===0 || !corta)) return {...largo, recon:true};
-  if (eSel==='total') return {meses:D.meses, saldo:D.total, ap:D.total.map(()=>null), mk:D.total.map(()=>null)};
   return {meses:D.meses, ...corta};
 }
 function rEvo(){
   // sin histórico importado no hay nada que dibujar, y se dice
-  if (!D.meses.length){
+  if (!eSerie().meses.length){
     $('eTitulo').textContent = 'Sin histórico';
     $('eValor').textContent = raya; $('eDelta').textContent = '';
     $('eDos').innerHTML = ''; $('g').innerHTML = ''; $('eTabla').innerHTML = '';
@@ -920,17 +927,42 @@ function rFot(){
 }
 
 /* ════════════ RENDER GLOBAL ════════════ */
-function render(){ rMes(); rPat(); rEvo(); rFot(); save(); }
+function render(){
+  // Repintar destruye los <input> y el móvil cierra el teclado. Se guarda quién
+  // tenía el foco y dónde estaba el cursor, y se devuelve después.
+  const a = document.activeElement;
+  const id = a && a.tagName === 'INPUT' ? a.id : null;
+  const marca = a && a.tagName === 'INPUT' ? (a.dataset.pct||a.dataset.mano||'') : '';
+  const pos = a && a.selectionStart != null ? a.selectionStart : null;
+  const txt = a && a.tagName === 'INPUT' ? a.value : null;
+
+  rMes(); rPat(); rEvo(); rFot(); save();
+
+  if (id || marca){
+    const n = id ? $(id)
+      : document.querySelector(`[data-pct="${marca}"],[data-mano="${marca}"]`);
+    if (n && n !== document.activeElement){
+      // se devuelve el texto TAL CUAL se estaba tecleando: si el usuario va por
+      // «8,» no se le convierte en «8» a media palabra
+      if (txt != null && n.value !== txt) n.value = txt;
+      n.focus({preventScroll:true});
+      if (pos != null && n.setSelectionRange) { try{ n.setSelectionRange(pos,pos); }catch(e){} }
+    }
+  }
+}
+// mientras se teclea basta con recalcular; el repintado completo espera a que pare
+let tRender = null;
+function renderPronto(){ clearTimeout(tRender); tRender = setTimeout(render, 350); }
 
 /* ════════════ EVENTOS ════════════ */
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.pct){ const c=S.config.cats.find(x=>x.id===t.dataset.pct);
-    if(c){ c.pct=parseFloat(t.value)||0; render(); } return; }
+    if(c){ c.pct=parseFloat(t.value)||0; renderPronto(); } return; }
   if (t.dataset.mano){ const v=parseFloat(t.value);
-    if(isFinite(v)&&v>=0){ S.mano[t.dataset.mano].eur=v; render(); } return; }
+    if(isFinite(v)&&v>=0){ S.mano[t.dataset.mano].eur=v; renderPronto(); } return; }
   const map={iNomina:'nomina',iFijos:'fijos',iExtra:'extra',iIntTR:'intTR',iSobre:'sobre'};
-  if (map[t.id]){ const v=parseFloat(t.value); mes()[map[t.id]] = isFinite(v)?v:null; render(); }
+  if (map[t.id]){ const v=parseFloat(t.value); mes()[map[t.id]] = isFinite(v)?v:null; renderPronto(); }
 });
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
