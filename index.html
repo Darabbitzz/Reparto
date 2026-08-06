@@ -556,7 +556,10 @@ function aplicarMes(){
   S.feHoy = S.cuentaTR.comp.fe;
   m.aplicado = dest;
 }
-const pendiente = c => Math.max(S.cuentaTR.comp[c.id] - (mes().ap[c.id]??0), 0);
+// El bolsillo YA es lo pendiente: aplicarMes() le sumó lo del mes y aportar se
+// lo resta al momento. Restarle además lo aportado era contarlo dos veces y
+// dejaba el pendiente a cero en cuanto se aportaba algo (06/08/2026).
+const pendiente = c => Math.max(S.cuentaTR.comp[c.id], 0);
 
 /* ════════════ RENDER · MES ════════════ */
 let abierto = null;
@@ -1178,6 +1181,11 @@ window.__checks = function(){
   const enComp = Object.entries(mes().aplicado || {}).every(([k,v]) =>
     v <= 0 || (S.cuentaTR.comp[k] ?? 0) >= -0.005);
   ok('lo cobrado está en los bolsillos', enComp, eur(ap)+' aplicados este mes');
+  // 7 · lo pendiente de cada categoría ES su bolsillo. Si alguna vez difieren,
+  //     algo se está restando dos veces (pasó el 06/08/2026 al aportar).
+  const desc = S.config.cats.filter(c => !c.acumula &&
+    Math.abs(pendiente(c) - Math.max(S.cuentaTR.comp[c.id],0)) > 0.005).map(c => c.n);
+  ok('pendiente = bolsillo, sin restar dos veces', !desc.length, desc.join(', ') || 'las 5 cuadran');
   return out.join('\n');
 };
 
