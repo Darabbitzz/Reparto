@@ -1,5 +1,8 @@
 'use strict';
-const CACHE = 'reparto-2026-08-04-e827d41f6f';
+// El nombre lleva el hash de index.html y lo reescribe ensamblar/publicar.js en cada
+// publicación. El navegador solo reinstala el worker si ESTE archivo cambia: si la app
+// cambia y el nombre no, se sirve la vieja para siempre. Pasó el 06/08/2026.
+const CACHE = 'reparto-fe3eb37435';
 const ESTATICOS = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', ev => {
@@ -30,6 +33,15 @@ self.addEventListener('fetch', ev => {
     return;
   }
 
-  // Lo demás es la app: caché primero, que es lo que la hace abrir sin red.
-  ev.respondWith(caches.match(ev.request).then(r => r || fetch(ev.request)));
+  // La app: RED PRIMERO, caché como respaldo. Antes era al revés, y por eso una
+  // versión nueva podía no verse nunca. Sigue abriendo sin red; solo que ahora
+  // prefiere la de verdad cuando la hay.
+  ev.respondWith(
+    fetch(ev.request)
+      .then(r => {
+        if (r && r.ok) { const copia = r.clone(); caches.open(CACHE).then(c => c.put(ev.request, copia)); }
+        return r;
+      })
+      .catch(() => caches.match(ev.request).then(r => r || caches.match('./index.html')))
+  );
 });
