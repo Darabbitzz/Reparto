@@ -210,8 +210,10 @@ button.fr{cursor:pointer;font:inherit}
 .cab .v{font-size:36px;font-weight:700}
 .cab .d{margin-top:4px;font-size:15px;color:var(--mute)}
 .cab .d .up{color:var(--primary-dark);font-weight:700} .cab .d .dn{color:var(--error);font-weight:700}
-#g{display:block;width:100%;height:200px;margin-top:12px}
+#g{display:block;width:100%;height:200px;margin-top:12px;touch-action:none}
 .gx{font-size:10px;fill:var(--mute)}
+.cab .v.scrub{color:var(--primary-dark)}
+.cab .d .fecha{font-weight:700;color:var(--ink)}
 .dos{display:flex;margin:16px 16px 0;border:1px solid var(--hairline);border-radius:var(--r)}
 .dos>div{flex:1;padding:12px 14px}
 .dos>div+div{border-left:1px solid var(--hairline);background:var(--surface-soft)}
@@ -841,6 +843,8 @@ const RAMAS = [
 const MESC={'01':'ene','02':'feb','03':'mar','04':'abr','05':'may','06':'jun','07':'jul','08':'ago','09':'sep','10':'oct','11':'nov','12':'dic'};
 const et = ym => MESC[ym.slice(5)]+'-'+ym.slice(2,4);
 let eSel='total', ePer=0;
+// scrub = el mes que el dedo está tocando en la gráfica; null = ninguno
+let scrub = null, GRAF = null;
 $('eQue').innerHTML = RAMAS.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
 function eSerie(){
   // «Patrimonio total» se construye desde LAS FOTOS, que son su única fuente:
@@ -870,12 +874,22 @@ function rEvo(){
   const i0 = Math.max(0, s.meses.length-n);
   const ms=s.meses.slice(i0), sa=s.saldo.slice(i0), ap=s.ap.slice(i0), mk=s.mk.slice(i0);
   $('eTitulo').textContent = r.n.trim();
-  $('eValor').textContent = eur(sa[sa.length-1]);
-  const d = sa[sa.length-1]-sa[0];
-  $('eDelta').innerHTML = `a ${et(ms[ms.length-1])} · desde ${et(ms[0])}:
-    <span class="${d>=0?'up':'dn'}">${d>=0?'+':''}${eur0(d)}</span>`;
   const W=340,H=200,P=8, min=Math.min(...sa), max=Math.max(...sa), rg=(max-min)||1;
   const X=i=>P+i*(W-2*P)/Math.max(ms.length-1,1), Y=v=>H-24-(v-min)/rg*(H-24-P);
+  // el dedo puede estar posado sobre un mes: entonces manda ese, no el último
+  GRAF = {ms, sa, X, W, P};
+  const foco = (scrub !== null && scrub < ms.length) ? scrub : ms.length-1;
+  $('eValor').textContent = eur(sa[foco]);
+  $('eValor').classList.toggle('scrub', scrub !== null);
+  if (scrub !== null){
+    const dd = sa[foco]-sa[0];
+    $('eDelta').innerHTML = `<span class="fecha">${et(ms[foco])}</span> · desde ${et(ms[0])}:
+      <span class="${dd>=0?'up':'dn'}">${dd>=0?'+':''}${eur0(dd)}</span>`;
+  } else {
+    const d = sa[sa.length-1]-sa[0];
+    $('eDelta').innerHTML = `a ${et(ms[ms.length-1])} · desde ${et(ms[0])}:
+      <span class="${d>=0?'up':'dn'}">${d>=0?'+':''}${eur0(d)}</span>`;
+  }
   let path='',pts='',ejes='';
   ms.forEach((m,i)=>{
     const hueco = r.huecos && r.huecos.includes(m);
@@ -886,8 +900,12 @@ function rEvo(){
     if (i%Math.ceil(ms.length/5)===0||i===ms.length-1)
       ejes+=`<text class="gx" x="${X(i)}" y="${H-6}" text-anchor="${i===0?'start':i===ms.length-1?'end':'middle'}">${et(m)}</text>`;
   });
+  // guía vertical y punto gordo bajo el dedo
+  const guia = scrub===null ? '' :
+    `<line x1="${X(foco)}" y1="${P}" x2="${X(foco)}" y2="${H-24}" stroke="var(--primary)" stroke-width="1.5"/>
+     <circle cx="${X(foco)}" cy="${Y(sa[foco])}" r="6" fill="var(--primary)" stroke="var(--canvas)" stroke-width="2"/>`;
   $('g').innerHTML = `<line x1="${P}" y1="${H-24}" x2="${W-P}" y2="${H-24}" stroke="var(--hairline)"/>
-    <path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2"/>${pts}${ejes}`;
+    <path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2"/>${pts}${guia}${ejes}`;
   const avisos = {
     ahorro:'Aquí no cotiza nada: todo lo que sube es dinero que has metido tú.',
     cuenta:'Entran los intereses de TR (hasta jul-26) y salen los descuadres. Los puntos rojos son retiradas.',
@@ -1098,10 +1116,37 @@ $('fFile').onchange = e => {
   };
   lector.readAsText(f); e.target.value='';
 };
-$('eQue').onchange = e => { eSel=e.target.value; rEvo(); };
+/* ── el dedo sobre la gráfica: mientras esté posado manda ese mes ──
+   Vale tocar el punto o cualquier sitio de su columna, que en un móvil es lo
+   único que se acierta. Al soltar vuelve al presente. */
+(function(){
+  const g = $('g');
+  const mesBajoElDedo = ev => {
+    if (!GRAF || !GRAF.ms.length) return null;
+    const r = g.getBoundingClientRect();
+    if (!r.width) return null;
+    // preserveAspectRatio="none": la x del viewBox es proporcional a la del elemento
+    const x = (ev.clientX - r.left) / r.width * GRAF.W;
+    let mejor = 0, dist = Infinity;
+    GRAF.ms.forEach((_, i) => { const d = Math.abs(GRAF.X(i) - x); if (d < dist){ dist = d; mejor = i; } });
+    return mejor;
+  };
+  const mover = ev => { const i = mesBajoElDedo(ev); if (i !== null && i !== scrub){ scrub = i; rEvo(); } };
+  const soltar = () => { if (scrub !== null){ scrub = null; rEvo(); } };
+  g.addEventListener('pointerdown', ev => {
+    // capturar el puntero es un extra para no perder el dedo al salirse del SVG;
+    // si el navegador lo rechaza, el gesto tiene que seguir funcionando igual
+    try { g.setPointerCapture(ev.pointerId); } catch(e){}
+    ev.preventDefault(); mover(ev);
+  });
+  g.addEventListener('pointermove', ev => { if (scrub !== null) mover(ev); });
+  ['pointerup','pointercancel','pointerleave'].forEach(e => g.addEventListener(e, soltar));
+})();
+
+$('eQue').onchange = e => { eSel=e.target.value; scrub=null; rEvo(); };
 document.querySelectorAll('#ePer button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#ePer button').forEach(x=>x.classList.remove('on'));
-  b.classList.add('on'); ePer=+b.dataset.p; rEvo(); });
+  b.classList.add('on'); ePer=+b.dataset.p; scrub=null; rEvo(); });
 document.querySelector('#tarta').addEventListener('click', e=>{
   if(!e.target.closest('button')){ soloInv=!soloInv; rTarta(); }});
 
