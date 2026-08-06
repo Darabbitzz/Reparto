@@ -522,7 +522,39 @@ function asigMes(c){
   const e = inv*c.pct/100;
   return c.id==='rv' ? Math.max(e - S.config.pens, 0) : e;
 }
-const pendiente = c => Math.max(S.cuentaTR.comp[c.id] + (asigMes(c)??0) - (mes().ap[c.id]??0), 0);
+
+/* ══ COBRAR: el dinero entra de verdad ══
+   Declarar la nómina no era solo pintar el reparto: ese dinero está en la
+   cuenta. Se mete en el saldo y en los bolsillos, y se guarda cuánto se
+   aplicó (mes.aplicado) para poder rehacerlo si se corrige la cifra.
+   Lo que NO entra es el «para gastar»: es consumo, se va. */
+function aplicarMes(){
+  const m = mes();
+  const dest = {};                                    // lo que DEBERÍA estar aplicado
+  if (m.nomina !== null){
+    const restante = Math.max(m.nomina + (m.extra??0) - (m.fijos??0), 0);
+    const gasto = restante*(100-S.config.pInv)/100;
+    S.config.cats.forEach(c => dest[c.id] = asigMes(c) ?? 0);
+    dest.fe = gasto*S.config.pFE/100 + (m.intTR ?? 0) - (m.sobre ?? 0);
+    // los 125 € del plan salen de renta variable y se van del banco al fondo:
+    // sin esta línea el patrimonio perdía 125 € cada mes que se cobraba
+    const rvBruto = restante*S.config.pInv/100*S.config.cats.find(c=>c.id==='rv').pct/100;
+    dest.pens = Math.min(S.config.pens, rvBruto);
+  }
+  const ya = m.aplicado || {};
+  let deltaSaldo = 0;
+  new Set([...Object.keys(dest), ...Object.keys(ya)]).forEach(k => {
+    const d = (dest[k] ?? 0) - (ya[k] ?? 0);
+    if (!d) return;
+    if (k === 'pens'){ S.mano.pens.eur += d; return; }   // sale de TR, entra en el plan
+    S.cuentaTR.comp[k] = (S.cuentaTR.comp[k] ?? 0) + d;
+    deltaSaldo += d;
+  });
+  S.cuentaTR.saldo += deltaSaldo;
+  S.feHoy = S.cuentaTR.comp.fe;
+  m.aplicado = dest;
+}
+const pendiente = c => Math.max(S.cuentaTR.comp[c.id] - (mes().ap[c.id]??0), 0);
 
 /* ════════════ RENDER · MES ════════════ */
 let abierto = null;
@@ -566,14 +598,16 @@ function rMes(){
   $('shBruto').textContent = m.sobre===null?raya:eur(m.sobre);
   $('shFondo').textContent = (entro===null||m.sobre===null)?raya:eur(S.feHoy + entro - m.sobre);
 
+  // el bolsillo YA lleva dentro lo de este mes: aplicarMes() lo metió al cobrar
+  const delMes = c => (m.aplicado && m.aplicado[c.id]) || 0;
   $('mAcum').innerHTML = S.config.cats.filter(c=>c.acumula).map(c => {
-    const n = asigMes(c) ?? 0;
+    const n = delMes(c);
     return `<div class="row"><span class="nm">${c.n}<small>${c.sub||''}${n?` · + ${eur(n)} este mes`:''}</small></span>
-      <span class="eu num">${eur(S.cuentaTR.comp[c.id] + n)}</span></div>`; }).join('');
+      <span class="eu num">${eur(S.cuentaTR.comp[c.id])}</span></div>`; }).join('');
 
   let tot = 0;
   $('mPend').innerHTML = S.config.cats.filter(c=>!c.acumula).map(c => {
-    const arr = S.cuentaTR.comp[c.id], nue = asigMes(c) ?? 0, apo = m.ap[c.id] ?? 0;
+    const nue = delMes(c), apo = m.ap[c.id] ?? 0, arr = S.cuentaTR.comp[c.id] - nue + apo;
     const t = pendiente(c); tot += t;
     const det = [`${eur(arr)} arrastrado`];
     if (nue) det.push(`+ ${eur(nue)} de este mes`);
@@ -962,7 +996,9 @@ document.addEventListener('input', e => {
   if (t.dataset.mano){ const v=parseFloat(t.value);
     if(isFinite(v)&&v>=0){ S.mano[t.dataset.mano].eur=v; renderPronto(); } return; }
   const map={iNomina:'nomina',iFijos:'fijos',iExtra:'extra',iIntTR:'intTR',iSobre:'sobre'};
-  if (map[t.id]){ const v=parseFloat(t.value); mes()[map[t.id]] = isFinite(v)?v:null; renderPronto(); }
+  if (map[t.id]){ const v=parseFloat(t.value); mes()[map[t.id]] = isFinite(v)?v:null;
+    aplicarMes();                       // el dinero entra en la cuenta de verdad
+    renderPronto(); }
 });
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
@@ -979,15 +1015,13 @@ document.addEventListener('click', e => {
     const c=S.config.cats.find(x=>x.id===b.dataset.ok), n=parseFloat($('apEu').value);
     if (isFinite(n)&&n>0){
       const m=mes(); m.ap[c.id]=(m.ap[c.id]??0)+n;
-      // el dinero SALE de la cuenta y pasa a euros planos: patrimonio no cambia.
-      // Primero consume la asignación del mes; solo el resto sale del bolsillo,
-      // y se guarda CUÁNTO para poder deshacerlo exacto.
+      // el dinero SALE de la cuenta y pasa a euros planos: el patrimonio no
+      // cambia. Ahora el bolsillo ya lleva dentro lo del mes, así que sale de
+      // ahí y punto: se acabó repartir entre asignación y arrastre.
       S.cuentaTR.saldo -= n;
-      const asig=asigMes(c)??0, deAsig=Math.min(n, Math.max(asig-((m.ap[c.id]-n)||0),0));
-      const deComp = Math.min(n-deAsig, S.cuentaTR.comp[c.id]);
-      S.cuentaTR.comp[c.id] -= deComp;
+      S.cuentaTR.comp[c.id] -= n;
       S.planos[c.id] += n;
-      S.mov.push({id:Date.now()+Math.random(), cat:c.id, eur:n, deComp, f:HOY, activo:null, u:null});
+      S.mov.push({id:Date.now()+Math.random(), cat:c.id, eur:n, f:HOY, activo:null, u:null});
     }
     abierto=null; render(); return; }
   if (b.dataset.conv){
@@ -1023,7 +1057,7 @@ document.addEventListener('click', e => {
       if (v.traspaso){ if(v.dest) S.planos[v.dest] -= v.eur; S.planos.liq += v.eur; }
       S.planos[v.cat] -= v.eur;
       S.cuentaTR.saldo += v.eur;
-      S.cuentaTR.comp[v.cat] += v.deComp ?? 0;        // solo lo que salió del bolsillo
+      S.cuentaTR.comp[v.cat] += v.eur;                // vuelve entero al bolsillo
       m.ap[v.cat] = Math.max((m.ap[v.cat]??0)-v.eur, 0);
       S.mov.splice(i,1);
     }
@@ -1093,6 +1127,12 @@ window.__checks = function(){
   // 5 · los % del reparto suman 100
   const s=S.config.cats.reduce((a,c)=>a+c.pct,0);
   ok('reparto suma 100', Math.abs(s-100)<0.051, s.toFixed(2));
+  // 6 · cobrar tiene que llegar a todas partes: lo aplicado del mes está dentro
+  //     de los bolsillos, y por tanto dentro del patrimonio
+  const ap = Object.values(mes().aplicado || {}).reduce((a,b)=>a+b,0);
+  const enComp = Object.entries(mes().aplicado || {}).every(([k,v]) =>
+    v <= 0 || (S.cuentaTR.comp[k] ?? 0) >= -0.005);
+  ok('lo cobrado está en los bolsillos', enComp, eur(ap)+' aplicados este mes');
   return out.join('\n');
 };
 

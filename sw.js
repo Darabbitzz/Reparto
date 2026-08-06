@@ -2,7 +2,7 @@
 // El nombre lleva el hash de index.html y lo reescribe ensamblar/publicar.js en cada
 // publicación. El navegador solo reinstala el worker si ESTE archivo cambia: si la app
 // cambia y el nombre no, se sirve la vieja para siempre. Pasó el 06/08/2026.
-const CACHE = 'reparto-c1aff747a6';
+const CACHE = 'reparto-65b7a1ec8c';
 const ESTATICOS = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', ev => {
