@@ -181,6 +181,8 @@ button.fr{cursor:pointer;font:inherit}
                 min-width:64px;text-align:right}
 .chapter .l span.pc.neg{color:var(--error)}
 #pRend .l b{color:var(--on-dark);font-weight:700;font-variant-numeric:tabular-nums}
+/* el «X € aportados» del Total: que no lo tiña el rojo del autoshame (.chapter .big span:last-child) */
+#pRend .l.big span span{color:var(--on-dark-mute)}
 #pRend .l.big{border-bottom:0;padding-top:20px;align-items:baseline}
 #pRend .l.big span:first-child{font-size:16px;font-weight:700;color:var(--on-dark)}
 #pRend .l.big b{font-size:36px;line-height:1.25;color:var(--primary)}
@@ -260,7 +262,7 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 </head>
 <body>
 
-<div class="util"><span id="uPrecio">Precios · cargando…</span><span>06/08/2026</span></div>
+<div class="util"><span id="uPrecio">Precios · cargando…</span><span id="uHoy"></span></div>
 <div class="nav">
   <div class="wordmark">Repar<i>to</i></div>
   <button class="eye" id="eye">Ocultar</button>
@@ -349,14 +351,15 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     <div class="tt">Desde el origen</div>
     <div class="ss">Lo que has puesto tú frente a lo que ha puesto el mercado.</div>
     <div id="pRend"></div>
-    <div class="foot">Cifras a 05/08/2026. Acumulado, no anualizado: buena parte del dinero entró
-      mucho después del origen.</div>
+    <div class="foot">Lo aportado suma lo que conviertes en la app; el valor va a los precios de la
+      cabecera. Acumulado, no anualizado: buena parte del dinero entró mucho después del origen.</div>
   </div>
 
   <div class="eyebrow">¿Le ganas a la inflación?</div>
   <div class="card" id="pIpc"></div>
   <div class="note">IPC del INE, interanual a diciembre: <b>2023 3,41 % · 2024 2,94 % · 2025
-    2,92 %</b> (a nov). El de 2026 no está publicado.</div>
+    2,92 %</b> (a nov). El de 2026 no está publicado. La TIR sale del histórico del import, a su
+    fecha de corte: lo convertido después aún no la mueve.</div>
 
   <div class="eyebrow">La cartera, año a año</div>
   <div class="card" id="pAnual"></div>
@@ -422,7 +425,10 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 /* ════════════════ ESTADO ÚNICO ════════════════
    Todo lo que se toca vive aquí. Las cuatro pestañas leen de él y
    TODA cifra de patrimonio sale de la única función patrimonio(). */
-const HOY = '2026-08-06';
+// La fecha real del dispositivo: estampa fotos, movimientos y frescura. Estuvo
+// clavada a la fecha de publicación y eso pudría los «hace X días» con cada
+// día que pasaba y fechaba mal las fotos nuevas.
+const HOY = (d => d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'))(new Date());
 // La app viaja VACÍA. Los datos entran por Importar (Fotos → Respaldo) y viven
 // solo en el localStorage de este dispositivo. Nada personal se publica jamás.
 const SEED = {
@@ -494,7 +500,7 @@ const uds = n => n.toLocaleString('es-ES',{maximumFractionDigits:8});
 const dias = f => Math.round((new Date(HOY)-new Date(f))/864e5);
 const raya = '—';
 const MESN=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-let ymAct = '2026-08';
+let ymAct = HOY.slice(0,7);
 const mes = () => { if(!S.meses[ymAct]) S.meses[ymAct]={nomina:null,fijos:700,extra:null,intTR:null,sobre:null,ap:{}};
                     return S.meses[ymAct]; };
 
@@ -794,32 +800,80 @@ function rTR(){
 /* ── bloques analíticos: invertido, origen, IPC, año a año ─────────────── */
 const IPC = {2023:3.41, 2024:2.94, 2025:2.92}, IPC_MEDIO = 3.09;
 
+/* El histórico del import (ORIGEN) está congelado a su fecha de corte. Esta
+   función lo trae al presente con lo que la app SÍ sabe que pasó después:
+   las conversiones de S.mov (euros → unidades), el plan de pensiones de los
+   meses cobrados, y el valor actual a precio de hoy. Solo la TIR se queda
+   congelada: recalcularla exige el histórico completo de flujos, que no viaja.
+   Convención: el histórico cierra en el mes ANTERIOR al del corte; los meses
+   cobrados desde el mes del corte se suman aquí. */
+function origenVivo(){
+  const corte = (S.hist && S.hist.corte) || '2026-08-05';   // los imports viejos no llevan fecha
+  const nuevos = {rv:0, fin:0, cri:0, oro:0, pens:0, world:0, nasdaq:0, btc:0, eth:0};
+  const CLAVE = {'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'};
+  S.mov.forEach(v => {
+    if (v.f <= corte || v.u === null || v.traspaso) return;  // pendientes y traspasos: aún no son inversión
+    const k = CLAVE[v.activo];
+    if (v.activo==='Finizens') nuevos.fin += v.eur;
+    else if (k==='world'||k==='nasdaq'){ nuevos.rv += v.eur; nuevos[k] += v.eur; }
+    else if (k==='btc'||k==='eth'){ nuevos.cri += v.eur; nuevos[k] += v.eur; }
+    else if (k==='oroU') nuevos.oro += v.eur;
+  });
+  Object.entries(S.meses).forEach(([ym,m]) => {              // el plan se aporta al cobrar
+    if (ym >= corte.slice(0,7) && m.aplicado && m.aplicado.pens) nuevos.pens += m.aplicado.pens;
+  });
+  const vpos = ks => { let s=0;
+    for (const k of ks){ const p=precioDe(k); if (p===null) return null; s += S.pos[k].u*p; }
+    return s; };
+  const val = { world:vpos(['world']), nasdaq:vpos(['nasdaq']), rv:vpos(['world','nasdaq']),
+    btc:vpos(['btc']), eth:vpos(['eth','steth']), cri:vpos(['btc','eth','steth']),
+    oro:vpos(['oroU']), fin:S.mano.fin.eur, pens:S.mano.pens.eur };
+  const O = {};
+  Object.keys(val).forEach(k => { const b = ORIGEN[k] || {};
+    O[k] = { ap:(b.ap||0)+(nuevos[k]||0), val:val[k],
+             tir:b.tir ?? null, desde:b.desde ?? null, meses:b.meses ?? null }; });
+  const cima = ['rv','fin','cri','pens','oro'], bi = ORIGEN.invertido || {};
+  O.invertido = { ap:cima.reduce((s,k)=>s+O[k].ap,0),
+    val:cima.some(k=>O[k].val===null) ? null : cima.reduce((s,k)=>s+O[k].val,0),
+    tir:bi.tir ?? null, desde:bi.desde ?? null, meses:bi.meses ?? null };
+  return O;
+}
 
 let anioAb = null;
 function rInv(){
-  if (!ORIG_P.length){                       // sin histórico: los tres bloques callan
-    $('pInv').innerHTML = `<div class="fr"><span class="nm">Sin datos de aportaciones<small>impórtalos desde Fotos → Respaldo</small></span><span class="n na">—</span></div>`;
+  const O = origenVivo();
+  const pares = (ORIG_P.length ? ORIG_P
+    : [['Renta variable en TR','rv'],['Finizens','fin'],['Cripto','cri'],['Plan de pensiones','pens'],['Oro','oro']])
+    .filter(([,k]) => O[k] && (O[k].ap > 0.005 || (O[k].val ?? 0) > 0.005));
+  if (!pares.length){                        // ni histórico ni movimiento: los bloques callan
+    $('pInv').innerHTML = `<div class="fr"><span class="nm">Sin datos de aportaciones<small>impórtalos desde Fotos → Respaldo, o apunta la primera en Mes</small></span><span class="n na">—</span></div>`;
     $('pRend').innerHTML = ''; return;
   }
-  const ta = ORIG_P.reduce((s,[,k])=>s+ORIGEN[k].ap,0);
-  const tv = ORIG_P.reduce((s,[,k])=>s+ORIGEN[k].val,0);
-  const g = tv-ta;
+  const ta = pares.reduce((s,[,k])=>s+O[k].ap,0);
+  const parcial = pares.some(([,k])=>O[k].val===null);
+  const tv = pares.reduce((s,[,k])=>s+(O[k].val||0),0);
+  const g = tv-ta, mk = parcial?' +':'';
+  const fHoy = HOY.split('-').reverse().join('/');
   $('pInv').innerHTML =
-    `<div class="fr"><span class="nm">Has metido<small>desde ene-2023</small></span>
+    `<div class="fr"><span class="nm">Has metido<small>desde ${O.invertido.desde||'que usas la app'} · con lo convertido en la app</small></span>
        <span class="n num">${eur0(ta)}</span></div>
-     <div class="fr"><span class="nm">Vale<small>a 05/08/2026</small></span>
-       <span class="n num">${eur0(tv)}</span></div>
-     <div class="fr"><span class="nm">Ganancia<small>${(g/ta*100).toFixed(1)} % sobre lo invertido</small></span>
-       <span class="n num ${g>=0?'up':'dn'}">${(g>=0?'+':'')+eur0(g)}</span></div>`;
+     <div class="fr"><span class="nm">Vale<small>a ${fHoy}, con los precios de arriba</small></span>
+       <span class="n num">${eur0(tv)+mk}</span></div>
+     <div class="fr"><span class="nm">Ganancia<small>${ta>0?(g/ta*100).toFixed(1)+' % sobre lo invertido':''}</small></span>
+       <span class="n num ${g>=0?'up':'dn'}">${(g>=0?'+':'')+eur0(g)+mk}</span></div>`;
   let r='';
-  ORIG_P.forEach(([n,k]) => { const o=ORIGEN[k], gg=o.val-o.ap, p=gg/o.ap*100;
-    r += `<div class="l"><span>${n}<br><span style="font-size:11px">desde ${o.desde} · ${eur0(o.ap)} aportados</span></span>
+  pares.forEach(([n,k]) => { const o=O[k];
+    if (o.val===null){
+      r += `<div class="l"><span>${n}<br><span style="font-size:11px">desde ${o.desde||'—'} · ${eur0(o.ap)} aportados</span></span>
+        <b class="num">—</b><span class="pc" style="color:var(--on-dark-mute)">sin precio</span></div>`; return; }
+    const gg=o.val-o.ap, p=o.ap>0?gg/o.ap*100:null;
+    r += `<div class="l"><span>${n}<br><span style="font-size:11px">desde ${o.desde||'—'} · ${eur0(o.ap)} aportados</span></span>
       <b class="num">${eur0(o.val)}</b>
-      <span class="pc ${p<0?'neg':''}">${(p>=0?'+':'')+p.toFixed(1)} %</span></div>`; });
+      <span class="pc ${p!==null&&p<0?'neg':''}">${p===null?'—':(p>=0?'+':'')+p.toFixed(1)+' %'}</span></div>`; });
   // el remate: la ganancia total, grande y en verde, como en el diseño original
   r += `<div class="l big"><span>Total<br><span style="font-size:11px;font-weight:400">${eur0(ta)} aportados</span></span>
-      <b class="num">${(g>=0?'+':'')+eur0(g)}</b>
-      <span class="pc ${g<0?'neg':''}">${(g>=0?'+':'')+(g/ta*100).toFixed(1)} %</span></div>`;
+      <b class="num">${(g>=0?'+':'')+eur0(g)+mk}</b>
+      <span class="pc ${g<0?'neg':''}">${ta>0?(g>=0?'+':'')+(g/ta*100).toFixed(1)+' %':'—'}</span></div>`;
   $('pRend').innerHTML = r;
 }
 function rIpc(){
@@ -968,7 +1022,9 @@ function rEvo(){
     <td>${(tot.ap>=0?'+':'')+eur0(tot.ap)+marca}</td>
     <td class="${!cotiza?'na':tot.mk<0?'neg':'pos'}">${!cotiza?'·':(tot.mk>=0?'+':'')+eur0(tot.mk)+marca}</td></tr>`;
   $('eTabla').innerHTML = filas;
-  const o = ORIGEN[eSel], gan = o?o.val-o.ap:null;
+  // el «desde el origen» va en vivo: aportado del histórico + lo convertido en
+  // la app, valorado a precio de hoy. La TIR sí es la congelada del import.
+  const o = origenVivo()[eSel], gan = o && o.val!==null ? o.val-o.ap : null;
   const izq = r.tipo!=='cotiza' ? undefined : tot.mk;
   const cls = v=>v===undefined?'na':v>=0?'up':'dn';
   $('eDos').innerHTML = `
@@ -976,9 +1032,11 @@ function rEvo(){
       <div class="n ${cls(izq)}">${izq===undefined?'·':(izq>=0?'+':'')+eur0(izq)}${sinD&&cotiza?' +':''}</div>
       <div class="p">${et(ms[0])} → ${et(ms[ms.length-1])}</div></div>
     <div><div class="t">Desde el origen</div>
-      <div class="n ${o?cls(gan):'na'}">${o?(gan>=0?'+':'')+eur0(gan):'—'}</div>
-      <div class="p">${o ? (o.meses>=12 ? `desde ${o.desde} · <b>${(o.tir>=0?'+':'')+o.tir.toFixed(1)} % anual</b>`
-        : `desde ${o.desde} · <b>${(gan/o.ap*100).toFixed(1)} % en ${o.meses} meses</b>`) : 'no hay fecha de inicio conocida'}</div></div>`;
+      <div class="n ${gan!==null?cls(gan):'na'}">${gan!==null?(gan>=0?'+':'')+eur0(gan):'—'}</div>
+      <div class="p">${gan!==null && o.ap>0.005 ? (o.tir!==null && o.meses>=12
+          ? `desde ${o.desde} · <b>${(o.tir>=0?'+':'')+o.tir.toFixed(1)} % anual</b>`
+          : `desde ${o.desde||'el primer apunte'} · <b>${(gan/o.ap*100).toFixed(1)} %${o.meses?` en ${o.meses} meses`:''}</b>`)
+        : 'no hay fecha de inicio conocida'}</div></div>`;
   $('ePie').innerHTML = eSel==='total'
     ? 'Esta cifra es <b>el último saldo declarado</b> (jul-26). La pestaña Patrimonio valora con los precios del momento; pueden diferir sin que ninguna esté mal.'
     : '';
@@ -1232,6 +1290,7 @@ window.__checks = function(){
 };
 
 /* ════════════ ARRANQUE ════════════ */
+$('uHoy').textContent = HOY.split('-').reverse().join('/');
 // ETFs desde precios.json (lo regenera Actions a diario). Si falla, quedan
 // los precios de compra y el chip de frescura lo dice: degradar, no callar.
 fetch('precios.json')
