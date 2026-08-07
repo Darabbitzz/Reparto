@@ -122,6 +122,9 @@ section{display:none} section.on{display:block}
 .x{position:absolute;top:0;right:0;width:36px;height:36px;background:transparent;border:0;
    color:var(--mute);font-size:15px;font-weight:700;cursor:pointer}
 .x.est{position:static;width:32px;height:32px;flex:0 0 32px}
+/* quitar foto: el primer toque pregunta, el segundo quita. Un dedazo no borra. */
+.x.conf{position:static;width:auto;flex:0 0 auto;padding:0 10px;height:32px;
+        color:#fff;background:var(--error);border-radius:var(--r);font-size:12px}
 .vacio{padding:20px 16px;font-size:15px;color:var(--mute);text-align:center}
 /* PATRIMONIO */
 .total{padding:28px 16px}
@@ -1149,6 +1152,7 @@ function rEvo(){
 }
 
 /* ════════════ RENDER · FOTOS ════════════ */
+let fotoDel = null;              // índice de la foto a la que se le ha tocado el ✕
 function rFot(){
   $('fMano').innerHTML = Object.entries(S.mano).map(([k,m]) => {
     const d = dias(m.fecha);
@@ -1174,10 +1178,15 @@ function rFot(){
       : `Última copia hace ${dE} días.`;
   $('fLista').innerHTML = [...S.fotos].reverse().map((x,i,arr) => {
     const ant = arr[i+1], d = ant ? x.v-ant.v : null;
+    const idx = S.fotos.length-1-i;      // índice real en S.fotos, no en la lista invertida
+    // solo las fotos tuyas se pueden quitar: las de la hoja son historia importada
+    const quitar = x.hoja ? `<span style="flex:0 0 32px"></span>`
+      : fotoDel===idx ? `<button class="x conf" data-fok="${idx}">¿quitar?</button>`
+      : `<button class="x est" data-fdel="${idx}">✕</button>`;
     return `<div class="ft${x.hoja?'':' nueva'}">
       <span class="fh">${x.f}<small>${x.hoja?'de la hoja':'foto tuya'}</small></span>
       <span class="eu num">${eur0(x.v)}</span>
-      <span class="d num ${d===null?'':d>=0?'up':'dn'}">${d===null?'·':(d>=0?'+':'')+eur0(d)}</span></div>`; }).join('');
+      <span class="d num ${d===null?'':d>=0?'up':'dn'}">${d===null?'·':(d>=0?'+':'')+eur0(d)}</span>${quitar}</div>`; }).join('');
 }
 
 /* ════════════ RENDER GLOBAL ════════════ */
@@ -1222,6 +1231,8 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
+  // el «¿quitar?» de una foto caduca en cuanto tocas cualquier otra cosa
+  if (fotoDel !== null && b.dataset.fok === undefined && b.dataset.fdel === undefined) fotoDel = null;
   if (b.dataset.s){ document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
     ['mes','pat','evo','fot'].forEach(s=>$('s-'+s).classList.toggle('on', s===b.dataset.s)); return; }
   if (b.id==='eye'){ document.body.classList.toggle('hide');
@@ -1241,7 +1252,10 @@ document.addEventListener('click', e => {
       S.cuentaTR.saldo -= n;
       S.cuentaTR.comp[c.id] -= n;
       S.planos[c.id] += n;
-      S.mov.push({id:Date.now()+Math.random(), cat:c.id, eur:n, f:HOY, activo:null, u:null});
+      // ym = el mes al que se apuntó (el que estabas mirando): quitar el
+      // movimiento tiene que deshacer el apunte de ESE mes, no del que se
+      // esté mirando al quitarlo
+      S.mov.push({id:Date.now()+Math.random(), cat:c.id, eur:n, f:HOY, ym:ymAct, activo:null, u:null});
     }
     abierto=null; render(); return; }
   if (b.dataset.conv){
@@ -1266,7 +1280,10 @@ document.addEventListener('click', e => {
     render(); return; }
   if (b.dataset.del){
     const i=S.mov.findIndex(x=>x.id==b.dataset.del);
-    if (i>=0){ const v=S.mov[i], c=S.config.cats.find(x=>x.id===v.cat), m=mes();
+    if (i>=0){ const v=S.mov[i], c=S.config.cats.find(x=>x.id===v.cat);
+      // el apunte a deshacer vive en el mes del movimiento (los movimientos
+      // viejos no llevan ym: se estima por su fecha)
+      const m=S.meses[v.ym || v.f.slice(0,7)] || mes();
       // deshacer TODO: unidades, planos, cuenta y aportado del mes
       if (v.u!==null && !v.traspaso && !c.libre){
         const clave={'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'}[v.activo];
@@ -1296,6 +1313,12 @@ document.addEventListener('click', e => {
     Object.values(S.mano).forEach(m=>m.fecha=HOY);
     S.fotos.push({f:HOY, v:Math.round(P.total), hoja:false});
     render(); return; }
+  // quitar foto: primer toque pregunta, segundo quita; tocar otra cosa lo anula
+  if (b.dataset.fdel !== undefined){ fotoDel = +b.dataset.fdel; rFot(); return; }
+  if (b.dataset.fok !== undefined){
+    const x = S.fotos[+b.dataset.fok];
+    if (x && !x.hoja) S.fotos.splice(+b.dataset.fok, 1);   // las de la hoja, jamás
+    fotoDel = null; render(); return; }
 });
 // importar: valida ANTES de pisar nada. Un import malo no debe dejar la app rota.
 $('fFile').onchange = e => {
