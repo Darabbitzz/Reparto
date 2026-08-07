@@ -552,7 +552,11 @@ function aplicarMes(){
     const restante = Math.max(m.nomina + (m.extra??0) - (m.fijos??0), 0);
     const gasto = restante*(100-S.config.pInv)/100;
     S.config.cats.forEach(c => dest[c.id] = asigMes(c) ?? 0);
-    dest.fe = gasto*S.config.pFE/100 + (m.intTR ?? 0) - (m.sobre ?? 0);
+    // los intereses de TR van a renta fija, como dice la etiqueta del campo.
+    // Estuvieron entrando al fondo de emergencia con la etiqueta diciendo
+    // otra cosa (cazado el 07/08/2026 en una auditoría de flujos).
+    dest.rf += m.intTR ?? 0;
+    dest.fe = gasto*S.config.pFE/100 - (m.sobre ?? 0);
     // los 125 € del plan salen de renta variable y se van del banco al fondo:
     // sin esta línea el patrimonio perdía 125 € cada mes que se cobraba
     const rvBruto = restante*S.config.pInv/100*S.config.cats.find(c=>c.id==='rv').pct/100;
@@ -612,11 +616,13 @@ function rMes(){
        <span class="pct"><input value="${100-S.config.pFE}" disabled><span>%</span></span>
        <span class="eu num">${gastar===null?raya:eur(gastar)}</span></div>`;
 
-  const entro = fe===null ? null : fe + (m.intTR??0);
+  // Al fondo entra su parte del gasto, sin los intereses (esos van a renta
+  // fija). Y «queda en» es el bolsillo tal cual: aplicarMes() ya metió y sacó
+  // lo del mes, volver a sumarlo aquí lo contaba dos veces (07/08/2026).
   $('shPres').textContent = gastar===null?raya:eur(gastar);
-  $('shEntro').textContent = entro===null?raya:eur(entro);
+  $('shEntro').textContent = fe===null?raya:eur(fe);
   $('shBruto').textContent = m.sobre===null?raya:eur(m.sobre);
-  $('shFondo').textContent = (entro===null||m.sobre===null)?raya:eur(S.feHoy + entro - m.sobre);
+  $('shFondo').textContent = eur(S.cuentaTR.comp.fe);
 
   // el bolsillo YA lleva dentro lo de este mes: aplicarMes() lo metió al cobrar
   const delMes = c => (m.aplicado && m.aplicado[c.id]) || 0;
@@ -969,13 +975,15 @@ function apDe(id, ym){
   S.mov.forEach(v => { if (v.u===null || v.traspaso || v.f.slice(0,7)!==ym) return;
     const k = v.activo==='Finizens' ? 'fin' : CLAVE_ACT[v.activo];
     if (k && (RAMAS_DE[k]||[]).includes(id)) s += v.eur; });
-  const m = S.meses[ym] && S.meses[ym].aplicado;
+  const mm = S.meses[ym], m = mm && mm.aplicado;
   if (m){
     if (id==='pens'||id==='invertido') s += m.pens || 0;
     if (id==='rf') s += m.rf || 0;
     if (id==='fe') s += m.fe || 0;
     if (id==='liq') s += (m.liq||0) + (m.yolo||0) + (m.oro||0);
   }
+  // la serie de intereses pone lo cobrado en su columna, como las filas históricas
+  if (id==='int' && mm && mm.intTR) s += mm.intTR;
   return s;
 }
 // añade (o sustituye) el punto del mes en curso al final de una serie
@@ -1093,7 +1101,7 @@ function rEvo(){
   $('g').innerHTML = `<line x1="${P}" y1="${H-24}" x2="${W-P}" y2="${H-24}" stroke="var(--hairline)"/>
     <path d="${path}" fill="none" stroke="var(--ink)" stroke-width="2"/>${pts}${guia}${ejes}`;
   const avisos = {
-    ahorro:'Aquí no cotiza nada: todo lo que sube es dinero que has metido tú.',
+    ahorro:'Aquí no cotiza nada: sube por lo que metes tú y, en renta fija desde ago-2026, por los intereses de TR.',
     cuenta:'Entran los intereses de TR (hasta jul-26) y salen los descuadres. Los puntos rojos son retiradas.',
     interes:'Lo que la cuenta remunerada pagó, acumulado y neto. Hasta jul-2026 fue al fondo de emergencia y acabó gastado: es lo que habría, no lo que hay. Desde ago-2026 va a renta fija y lo alimenta el campo «Intereses TR» de Mes.',
   };
