@@ -14,10 +14,15 @@ permissions:
   pages: write
   id-token: write
 
-# Si llegan dos pushes seguidos, que gane el último y no se pisen.
+# Los despliegues de Pages se hacen en cola y NO se cancelan a medias: si se
+# corta uno entre subir el artefacto y desplegarlo, el backend de Pages se
+# queda con un despliegue que nunca termina y todos los siguientes se quedan
+# esperando en «in_progress» hasta agotar el tiempo, con el build en verde.
+# Es la propia recomendación de GitHub para este workflow, y aquí costó una
+# tarde entera el 06/08/2026: cada cuelgue vino detrás de uno cancelado.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   desplegar:
