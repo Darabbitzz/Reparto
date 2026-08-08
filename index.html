@@ -681,12 +681,16 @@ function rMes(){
 }
 
 /* ════════════ RENDER · PATRIMONIO ════════════ */
+// La tarta tiene dos vistas. «Todo»: el reparto de la nómina tal cual (los %
+// de config). «Sin renta fija»: la cartera de riesgo con su PROPIO objetivo
+// (alt), decidido el 07/08/2026 — no es el reparto renormalizado. El plan de
+// pensiones cuenta como renta variable en las dos (decisión del 07/08/2026).
 const OBJ = [
-  {id:'rf', n:'Renta fija', c:'var(--ink)', inv:false},
-  {id:'rv', n:'Renta variable', c:'var(--primary)', inv:true},
-  {id:'cri',n:'Cripto', c:'#5e5e5e', inv:true},
-  {id:'liqY',n:'Líquido', c:'#cccccc', inv:false},        // liquidez + yolo
-  {id:'oro',n:'Oro', c:'#a7a7a7', inv:true},
+  {id:'rf', n:'Renta fija', c:'var(--ink)'},
+  {id:'rv', n:'Renta variable', c:'var(--primary)', alt:48},
+  {id:'cri',n:'Cripto', c:'#5e5e5e', alt:33},
+  {id:'liqY',n:'Líquido', c:'#cccccc', alt:14},           // liquidez + yolo
+  {id:'oro',n:'Oro', c:'#a7a7a7', alt:5},
 ];
 let soloInv = false, pAbierto = {};
 function euCat(id){                                        // euros reales por categoría objetivo
@@ -706,13 +710,14 @@ function pctObj(id){
   return c.find(x=>x.id===id).pct;
 }
 function rTarta(){
-  const it = OBJ.map(o => ({...o, p:pctObj(o.id), e:euCat(o.id), on:!soloInv||o.inv}));
+  const it = OBJ.map(o => ({...o, p:soloInv?(o.alt||0):pctObj(o.id), e:euCat(o.id),
+                            on:!soloInv || o.alt !== undefined}));
   const tp = it.reduce((s,o)=>s+(o.on?o.p:0),0), te = it.reduce((s,o)=>s+(o.on?o.e:0),0);
   const rea = o => o.on&&te>0 ? o.e/te*100 : 0, pct = o => o.on ? o.p/tp*100 : 0;
   // barra apilada horizontal: rectángulos con corte recto, sin arcos que se rompan
   $('objBar').innerHTML = it.filter(o=>o.on).map(o =>
     `<i style="width:${rea(o).toFixed(2)}%;background:${o.c}"></i>`).join('');
-  $('barTit').textContent = soloInv?'Invertido':'Todo';
+  $('barTit').textContent = soloInv?'Sin renta fija':'Todo';
   $('barSub').textContent = eur0(te);
   const pc = n => n.toFixed(1).replace('.',',')+' %';
   $('pieLeg').innerHTML = `<div class="lr cab"><span></span><b>Actual</b><b>Objetivo</b><b>Δ</b></div>`
@@ -721,8 +726,11 @@ function rTarta(){
       return `<div class="lr"><span><i style="background:${o.c}"></i>${o.n}</span>
         <b>${pc(rea(o))}</b><b class="obj">${pc(pct(o))}</b>
         <b class="${Math.abs(d)<2?'neu':d>0?'sob':'baj'}">${(d>=0?'+':'')+d.toFixed(1).replace('.',',')}</b></div>`; }).join('');
-  $('pieAviso').innerHTML = `Sin el fondo de emergencia, que no entra en el reparto.
-    <em>Toca la tarta</em> para ${soloInv?'volver al reparto entero':'ver solo lo invertido'}.`;
+  $('pieAviso').innerHTML = `${soloInv
+      ? 'La cartera de riesgo con su propio objetivo: 48 · 33 · 14 · 5.'
+      : 'El reparto de la nómina.'} El plan de pensiones cuenta como renta variable.
+    Sin el fondo de emergencia, que no entra en el reparto.
+    <em>Toca la tarta</em> para ${soloInv?'volver al reparto entero':'ver la cartera sin la renta fija'}.`;
 }
 function rPat(){
   const P = patrimonio();
