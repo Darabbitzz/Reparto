@@ -122,6 +122,13 @@ section{display:none} section.on{display:block}
 .x{position:absolute;top:0;right:0;width:36px;height:36px;background:transparent;border:0;
    color:var(--mute);font-size:15px;font-weight:700;cursor:pointer}
 .x.est{position:static;width:32px;height:32px;flex:0 0 32px}
+/* selector porcentual/autobalance del mes */
+.modosel{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
+.modosel button{flex:1;height:32px;border:1px solid var(--hairline);background:transparent;
+  font:700 12px/1 inherit;border-radius:var(--r);cursor:pointer;text-transform:uppercase}
+.modosel button.on{background:var(--ink);color:var(--on-dark);border-color:var(--ink)}
+.modosel button:disabled{opacity:.4;cursor:default}
+.modosel .fij{flex:1 1 100%;font-size:11px;color:var(--mute)}
 /* quitar foto: el primer toque pregunta, el segundo quita. Un dedazo no borra. */
 .x.conf{position:static;width:auto;flex:0 0 auto;padding:0 10px;height:32px;
         color:#fff;background:var(--error);border-radius:var(--r);font-size:12px}
@@ -296,6 +303,7 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     <div class="split"><i class="a" style="width:70%"></i><i class="b" style="width:30%"></i></div>
     <div class="branch">
       <div class="bhead"><span class="n">Inversión<em>70 %</em></span><span class="a num" id="mInv">—</span></div>
+      <div class="modosel" id="mModo"></div>
       <div id="mCats"></div><div class="alerta" id="mAlerta"></div>
     </div>
     <div class="branch">
@@ -496,9 +504,18 @@ function cargarHist(){
   ORIG_P = h.origP  || [];
 }
 const KEY = 'reparto_v5';
+// Los traspasos del flujo viejo (liquidez → Cripto/RV/Oro) morían como euros
+// planos sin camino a unidades. Se reconvierten en conversiones pendientes:
+// reaparecen en la bandeja preguntando en qué se convirtieron.
+function migrar(s){
+  (s.mov||[]).forEach(v => { if (v.traspaso && v.dest && v.u===0){
+    v.cat=v.dest; v.origen='liq'; v.u=null;
+    delete v.traspaso; delete v.dest; delete v.activo; } });
+  return s;
+}
 let S;
 try { const raw = localStorage.getItem(KEY);
-      S = raw && JSON.parse(raw).v === SEED.v ? JSON.parse(raw) : structuredClone(SEED); }
+      S = raw && JSON.parse(raw).v === SEED.v ? migrar(JSON.parse(raw)) : structuredClone(SEED); }
 catch(e){ S = structuredClone(SEED); }
 cargarHist();
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
@@ -539,12 +556,29 @@ function patrimonio(){
                - Object.values(S.planos).reduce((a,b)=>a+b,0)*0; // planos ya salieron de la cuenta
   return r;
 }
-// asignación del mes por categoría (euros), desde el reparto
+// la bolsa de riesgo del mes: todo lo invertible menos renta fija y yolo.
+// En porcentual el plan sale de renta variable; en autobalance, de la bolsa.
+function poolRiesgo(inv, modo){
+  return modo==='auto'
+    ? inv*S.config.cats.filter(c=>c.id!=='rf'&&c.id!=='yolo').reduce((s,c)=>s+c.pct,0)/100
+    : inv*S.config.cats.find(c=>c.id==='rv').pct/100;
+}
+// asignación del mes por categoría (euros), desde el reparto.
+// Dos modos POR MES (m.modo): 'pct' = porcentajes fijos de siempre;
+// 'auto' = renta fija, yolo y plan conservan lo suyo y el resto de la bolsa
+// se reparte por hueco contra el objetivo 48/33/14/5 (mismo algoritmo que la
+// tarjeta «¿A dónde va lo siguiente?»). Decidido el 08/08/2026.
 function asigMes(c){
   const m = mes();
   if (m.nomina === null) return null;
   const restante = Math.max(m.nomina + (m.extra??0) - (m.fijos??0), 0);
   const inv = restante*S.config.pInv/100;
+  if ((m.modo||'pct')==='auto' && c.id!=='rf' && c.id!=='yolo'){
+    const P = poolRiesgo(inv, 'auto');
+    const pens = Math.min(S.config.pens, P);
+    const r = repartirHueco(P - pens, pens);
+    return c.id==='liq' ? r.liqY : r[c.id];
+  }
   const e = inv*c.pct/100;
   return c.id==='rv' ? Math.max(e - S.config.pens, 0) : e;
 }
@@ -566,10 +600,10 @@ function aplicarMes(){
     // otra cosa (cazado el 07/08/2026 en una auditoría de flujos).
     dest.rf += m.intTR ?? 0;
     dest.fe = gasto*S.config.pFE/100 - (m.sobre ?? 0);
-    // los 125 € del plan salen de renta variable y se van del banco al fondo:
-    // sin esta línea el patrimonio perdía 125 € cada mes que se cobraba
-    const rvBruto = restante*S.config.pInv/100*S.config.cats.find(c=>c.id==='rv').pct/100;
-    dest.pens = Math.min(S.config.pens, rvBruto);
+    // los 125 € del plan salen de renta variable (en auto, de la bolsa de
+    // riesgo) y se van del banco al fondo: sin esta línea el patrimonio
+    // perdía 125 € cada mes que se cobraba
+    dest.pens = Math.min(S.config.pens, poolRiesgo(restante*S.config.pInv/100, m.modo||'pct'));
   }
   const ya = m.aplicado || {};
   let deltaSaldo = 0;
@@ -606,13 +640,26 @@ function rMes(){
   $('mInv').textContent = hay ? eur(inv) : raya;
   $('mGas').textContent = hay ? eur(gasto) : raya;
 
+  // el selector de modo se bloquea en cuanto aportas algo del mes: cambiarlo
+  // entonces recolocaría dinero que ya salió y dejaría bolsillos en rojo
+  const modo = m.modo || 'pct';
+  const bloqueado = Object.values(m.ap || {}).some(x => x > 0.005);
+  $('mModo').innerHTML =
+    `<button data-modo="pct" class="${modo==='pct'?'on':''}" ${bloqueado?'disabled':''}>% fijos</button>
+     <button data-modo="auto" class="${modo==='auto'?'on':''}" ${bloqueado?'disabled':''}>Autobalance</button>`
+    + (bloqueado ? `<span class="fij">Ya has aportado este mes: el modo queda fijado.</span>`
+       : modo==='auto' ? `<span class="fij">Renta fija, plan y yolo conservan lo suyo; el resto va a lo más lejos del objetivo 48·33·14·5.</span>` : '');
   let suma = 0;
   $('mCats').innerHTML = S.config.cats.map(c => { suma += c.pct;
     const e = asigMes(c);
     let sub = c.sub || '';
-    if (c.id==='rv' && hay) sub = 'tras descontar '+eur(Math.min(S.config.pens, inv*c.pct/100))+' del plan de pensiones';
+    if (c.id==='rv' && hay) sub = 'tras descontar '+eur(Math.min(S.config.pens, poolRiesgo(inv, modo)))+' del plan de pensiones';
+    const esAuto = modo==='auto' && c.id!=='rf' && c.id!=='yolo';
+    const celda = esAuto
+      ? `<span class="pct"><span style="font-size:10px;font-weight:700;color:var(--mute);text-transform:uppercase">auto</span></span>`
+      : `<span class="pct"><input type="number" step="0.05" value="${c.pct}" data-pct="${c.id}"><span>%</span></span>`;
     return `<div class="row"><span class="nm">${c.n}${sub?`<small>${sub}</small>`:''}</span>
-      <span class="pct"><input type="number" step="0.05" value="${c.pct}" data-pct="${c.id}"><span>%</span></span>
+      ${celda}
       <span class="eu num">${e===null?raya:eur(e)}</span></div>`; }).join('');
   $('mAlerta').textContent = Math.abs(suma-100)>0.051 ? `Los porcentajes suman ${suma.toFixed(2)} %, no 100 %.` : '';
 
@@ -670,7 +717,7 @@ function rMes(){
            <input type="number" step="any" placeholder="unidades" data-u="${v.id}">`;
     return `<div class="conv"><span class="badge">${c.n}</span>
       <button class="x" data-del="${v.id}">✕</button>
-      <div class="t">${eur(v.eur)} · ${v.f}</div>
+      <div class="t">${eur(v.eur)} · ${v.f}${v.origen?' · venía de '+S.config.cats.find(x=>x.id===v.origen).n.toLowerCase():''}</div>
       <div class="q">${c.destinos?'¿A dónde ha ido?':c.libre?'¿En qué lo has metido?':'¿En qué se convirtió, y en cuántas unidades?'}</div>
       <div class="go">${campo}<button class="btn p" data-conv="${v.id}">${c.destinos?'Anotar':'Convertir'}</button></div></div>`;
   }).join('') : `<div class="vacio">Nada pendiente. Cuando apuntes una aportación aparecerá aquí.</div>`;
@@ -716,6 +763,20 @@ function pctObj(id){
   if (id==='liqY') return c.find(x=>x.id==='liq').pct + c.find(x=>x.id==='yolo').pct;
   return c.find(x=>x.id===id).pct;
 }
+// reparte X entre las categorías de riesgo, proporcional al hueco de cada una
+// contra su objetivo (OBJ.alt). rvForzado = dinero que YA va a renta variable
+// sí o sí (el plan de pensiones) y cuenta como asignado antes de repartir.
+// La usan la tarjeta de Patrimonio y el modo autobalance de Mes.
+function repartirHueco(X, rvForzado){
+  const ks = OBJ.filter(o => o.alt !== undefined);
+  const v = {}; ks.forEach(o => v[o.id] = euCat(o.id));
+  v.rv += rvForzado || 0;
+  const T = ks.reduce((s,o)=>s+v[o.id],0) + X;   // v.rv ya lleva dentro lo forzado
+  let D = 0; const d = {};
+  ks.forEach(o => { d[o.id] = Math.max(o.alt/100*T - v[o.id], 0); D += d[o.id]; });
+  const r = {}; ks.forEach(o => r[o.id] = D>0 ? X*d[o.id]/D : 0);
+  return r;                                   // {rv, cri, liqY, oro}
+}
 function rTarta(){
   const it = OBJ.map(o => ({...o, p:soloInv?(o.alt||0):pctObj(o.id), e:euCat(o.id),
                             on:!soloInv || o.alt !== undefined}));
@@ -752,9 +813,8 @@ function rReb(){
   const pend = S.config.cats.filter(c=>!c.acumula).reduce((s,c)=>s+pendiente(c),0);
   const X = rebEur ?? pend;
   const T = V + X;
-  riesgo.forEach(o => o.d = Math.max(o.t/100*T - o.v, 0));   // hueco hasta el objetivo
-  const D = riesgo.reduce((s,o)=>s+o.d,0);
-  riesgo.forEach(o => o.a = D>0 ? X*o.d/D : 0);              // proporcional al hueco
+  const rep = repartirHueco(X, 0);            // el mismo reparto que el modo autobalance
+  riesgo.forEach(o => o.a = rep[o.id]);
   const pcFin = o => T>0 ? (o.v+o.a)/T*100 : 0;
   $('pReb').innerHTML =
     `<div class="fr"><span class="nm">Vas a aportar<small>de serie, tu «por invertir» pendiente (${eur(pend)})</small></span>
@@ -1284,6 +1344,12 @@ document.addEventListener('click', e => {
   if (b.id==='mPrev'||b.id==='mNext'){ let [y,m]=ymAct.split('-').map(Number);
     m += b.id==='mNext'?1:-1; if(m===0){m=12;y--;} if(m===13){m=1;y++;}
     ymAct = y+'-'+String(m).padStart(2,'0'); render(); return; }
+  if (b.dataset.modo){ const m = mes();
+    if (!Object.values(m.ap || {}).some(x => x > 0.005)){
+      m.modo = b.dataset.modo;
+      aplicarMes();                     // re-reparte el mes con el modo nuevo
+      render();
+    } return; }
   if (b.dataset.ap){ abierto = abierto===b.dataset.ap?null:b.dataset.ap; render();
     const i=$('apEu'); if(i){i.focus();i.select();} return; }
   if (b.dataset.ok){
@@ -1309,8 +1375,15 @@ document.addEventListener('click', e => {
     if (c.destinos){ if(!a) return;
       const dest={'Cripto':'cri','Oro':'oro','Renta variable':'rv'}[a];
       S.planos.liq -= v.eur;
-      if (dest) S.planos[dest] += v.eur;              // traspaso: sigue siendo patrimonio
-      v.activo=a; v.u=0; v.traspaso=true; v.dest=dest||null;
+      if (dest){
+        // el traspaso NO muere en euros planos: cambia de categoría y vuelve a
+        // la bandeja preguntando en qué se convirtió. Antes se quedaba como
+        // «aportado, aún sin unidades» para siempre (cazado el 07/08/2026).
+        S.planos[dest] += v.eur;
+        v.cat = dest; v.origen = v.origen || 'liq';   // al quitarlo, vuelve a liquidez
+        render(); return;
+      }
+      v.activo=a; v.u=0; v.traspaso=true; v.dest=null; // «Fuera de cartera»: sale y punto
     } else if (c.libre){ if(!a) return; v.activo=a; v.u=(isFinite(u)&&u>0)?u:0;
       // yolo con unidades no cotiza: se queda en planos contado en euros
     } else { if(!(isFinite(u)&&u>0)) return;
@@ -1338,8 +1411,10 @@ document.addEventListener('click', e => {
       if (v.traspaso){ if(v.dest) S.planos[v.dest] -= v.eur; S.planos.liq += v.eur; }
       S.planos[v.cat] -= v.eur;
       S.cuentaTR.saldo += v.eur;
-      S.cuentaTR.comp[v.cat] += v.eur;                // vuelve entero al bolsillo
-      m.ap[v.cat] = Math.max((m.ap[v.cat]??0)-v.eur, 0);
+      // si vino traspasado (liquidez → cripto…), vuelve al bolsillo de ORIGEN
+      const org = v.origen || v.cat;
+      S.cuentaTR.comp[org] += v.eur;
+      m.ap[org] = Math.max((m.ap[org]??0)-v.eur, 0);
       S.mov.splice(i,1);
     }
     render(); return; }
@@ -1375,7 +1450,7 @@ $('fFile').onchange = e => {
     if (falta.length){ $('bAviso').innerHTML =
       `<b style="color:var(--error)">Le faltan campos: ${falta.join(', ')}.</b> No se ha tocado nada.`; return; }
     const guardado = JSON.stringify(S);
-    S = j; if (!S.meses) S.meses={}; if (!S.mov) S.mov=[]; if (!S.fotos) S.fotos=[];
+    S = migrar(j); if (!S.meses) S.meses={}; if (!S.mov) S.mov=[]; if (!S.fotos) S.fotos=[];
     delete S.vacio; cargarHist();
     try { render(); }
     catch(err){ S = JSON.parse(guardado); cargarHist(); render();
