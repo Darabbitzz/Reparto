@@ -344,12 +344,6 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     <div id="pieLeg"></div>
     <div class="piePie" id="pieAviso"></div>
   </div>
-  <div class="eyebrow">¿A dónde va lo siguiente?</div>
-  <div class="card" id="pReb"></div>
-  <div class="note">Reparte sin vender: cada euro nuevo va a lo que está más por debajo del objetivo
-    de la cartera sin renta fija (48 · 33 · 14 · 5), proporcional a su hueco. Lo que ya va
-    sobrado recibe 0 €. La renta fija y el fondo de emergencia no entran.</div>
-
   <div class="eyebrow">Desglose</div>
   <div class="card" id="pArbol"></div>
   <div class="note">● precio de mercado · <span style="color:var(--warning)">●</span> tecleado a mano ·
@@ -702,8 +696,7 @@ function rMes(){
         <input type="number" step="0.01" id="apEu" value="${t.toFixed(2)}"></div>
       <button class="btn p" data-ok="${c.id}">Apuntar</button></div>`;
     return h; }).join('');
-  $('mPendNote').innerHTML = `Total por invertir: <b>${eur(tot)}</b>. Lo que no metas sigue aquí el
-    mes que viene. El reparto sugerido está en Patrimonio → «¿A dónde va lo siguiente?».`;
+  $('mPendNote').innerHTML = `Total por invertir: <b>${eur(tot)}</b>. Lo que no metas sigue aquí el mes que viene.`;
 
   const abiertos = S.mov.filter(x=>x.u===null);
   $('mConv').innerHTML = abiertos.length ? abiertos.map(v => {
@@ -722,7 +715,9 @@ function rMes(){
       <div class="go">${campo}<button class="btn p" data-conv="${v.id}">${c.destinos?'Anotar':'Convertir'}</button></div></div>`;
   }).join('') : `<div class="vacio">Nada pendiente. Cuando apuntes una aportación aparecerá aquí.</div>`;
 
-  const hechos = S.mov.filter(x=>x.u!==null);
+  // historial de conversiones, la más reciente arriba; el ✕ deshace entera
+  // (unidades, planos, cuenta y apunte del mes de origen)
+  const hechos = S.mov.filter(x=>x.u!==null).sort((a,b)=> b.f.localeCompare(a.f) || b.id-a.id);
   $('mHechoTit').hidden = !hechos.length;
   $('mHecho').innerHTML = hechos.length ? '<div class="card">'+hechos.map(v => {
     const d = desajuste(v);
@@ -800,31 +795,6 @@ function rTarta(){
     Sin el fondo de emergencia, que no entra en el reparto.
     <em>Toca la tarta</em> para ${soloInv?'volver al reparto entero':'ver la cartera sin la renta fija'}.`;
 }
-/* ── ¿A dónde va lo siguiente? — rebalanceo por aportación (sin vender) ──
-   Reparte los euros nuevos proporcionalmente al hueco de cada categoría de la
-   cartera de riesgo respecto a su objetivo (OBJ.alt). Es una guía, no ejecuta
-   nada: tú decides dónde meterlo de verdad. Estilo Bogleheads: comprar lo que
-   va por debajo, jamás sugerir ventas. */
-let rebEur = null;                       // lo tecleado; null = el «por invertir» pendiente
-function rReb(){
-  const riesgo = OBJ.filter(o => o.alt !== undefined)
-    .map(o => ({...o, t:o.alt, v:euCat(o.id)}));
-  const V = riesgo.reduce((s,o)=>s+o.v,0);
-  const pend = S.config.cats.filter(c=>!c.acumula).reduce((s,c)=>s+pendiente(c),0);
-  const X = rebEur ?? pend;
-  const T = V + X;
-  const rep = repartirHueco(X, 0);            // el mismo reparto que el modo autobalance
-  riesgo.forEach(o => o.a = rep[o.id]);
-  const pcFin = o => T>0 ? (o.v+o.a)/T*100 : 0;
-  $('pReb').innerHTML =
-    `<div class="fr"><span class="nm">Vas a aportar<small>de serie, tu «por invertir» pendiente (${eur(pend)})</small></span>
-       <span class="pct" style="display:flex;align-items:center;gap:4px">
-         <input type="number" step="1" id="rebEur" value="${X.toFixed(0)}" style="width:96px;height:44px;text-align:right;padding:12px;border:1px solid var(--hairline);border-radius:var(--r);font:700 16px/1.25 inherit;outline:none"><span>€</span></span></div>`
-    + (X<=0.005 || V<=0 ? `<div class="vacio">${V<=0?'Sin cartera que rebalancear.':'Nada que repartir: teclea una cantidad o cobra el mes.'}</div>`
-      : riesgo.map(o => `<div class="fr"><span class="nm"><i style="display:inline-block;width:10px;height:10px;background:${o.c};margin-right:7px"></i>${o.n}
-           <small>${o.a>0.005 ? `queda en ${pcFin(o).toFixed(1).replace('.',',')} % · objetivo ${o.t} %` : `ya va sobrado: ${(V>0?o.v/T*100:0).toFixed(1).replace('.',',')} % contra ${o.t} %`}</small></span>
-           <span class="n num${o.a>0.005?'':' na'}">${eur0(o.a)}</span></div>`).join(''));
-}
 function rPat(){
   const P = patrimonio();
   $('pTotal').textContent = eur(P.total) + (P.parcial ? ' +' : '');
@@ -836,7 +806,7 @@ function rPat(){
      : viejo.d>30 ? `<span class="chip bad">Caducado</span>` : viejo.d>7 ? `<span class="chip warn">Envejecido</span>`
      : `<span class="chip ok">Al día</span>`)
     + `<span class="chip">lo más viejo: ${viejo.n}, hace ${viejo.d} días</span>`;
-  rTarta(); rReb();
+  rTarta();
 
   const ramas = [
     {n:'Renta fija', liq:S.cuentaTR.comp.rf, nota:'entrada del piso · al 2 % en TR', hijos:[]},
@@ -1328,9 +1298,6 @@ document.addEventListener('input', e => {
   const map={iNomina:'nomina',iFijos:'fijos',iExtra:'extra',iIntTR:'intTR',iSobre:'sobre'};
   if (map[t.id]){ const v=parseFloat(t.value); mes()[map[t.id]] = isFinite(v)?v:null;
     aplicarMes();                       // el dinero entra en la cuenta de verdad
-    renderPronto(); return; }
-  if (t.id==='rebEur'){ const v=parseFloat(t.value);
-    rebEur = isFinite(v)&&v>=0 ? v : null;   // vacío = volver al pendiente de serie
     renderPronto(); }
 });
 document.addEventListener('click', e => {
@@ -1534,13 +1501,14 @@ window.__checks = function(){
   ok('TR: componentes = efectivo = saldo, y efectivo+posiciones = todo',
      Math.abs(tr.reduce((a,b)=>a+b,0)-trEf)<0.03 && Math.abs(trEf-S.cuentaTR.saldo)<0.005
      && Math.abs(trEf+trPos-trTodo)<0.03, eur(trEf));
-  // 9 · el rebalanceo reparte EXACTAMENTE lo que se va a aportar, ni un euro más
-  const rebIn = $('rebEur');
-  if (rebIn){
-    const partes = [...document.querySelectorAll('#pReb .fr .n')].map(x=>parseFloat(x.textContent.replace(/\./g,'').replace(',','.'))||0);
-    const x = parseFloat(rebIn.value)||0;
-    ok('rebalanceo: lo sugerido suma lo aportado', partes.length===0 || Math.abs(partes.reduce((a,b)=>a+b,0)-x)<2,
-       eur0(partes.reduce((a,b)=>a+b,0))+' de '+eur0(x));
+  // 9 · en modo autobalance, lo asignado al riesgo suma la bolsa exacta
+  const m9 = mes();
+  if ((m9.modo||'pct')==='auto' && m9.nomina !== null){
+    const inv9 = Math.max(m9.nomina + (m9.extra??0) - (m9.fijos??0), 0)*S.config.pInv/100;
+    const P9 = poolRiesgo(inv9,'auto'), pens9 = Math.min(S.config.pens, P9);
+    const rep9 = ['rv','cri','oro','liq'].reduce((s,id)=>s+(asigMes(S.config.cats.find(c=>c.id===id))||0),0);
+    ok('autobalance: el riesgo suma la bolsa menos el plan', Math.abs(rep9-(P9-pens9))<0.03,
+       eur(rep9)+' de '+eur(P9-pens9));
   }
   return out.join('\n');
 };
