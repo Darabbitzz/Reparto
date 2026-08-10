@@ -132,6 +132,11 @@ section{display:none} section.on{display:block}
 /* quitar foto: el primer toque pregunta, el segundo quita. Un dedazo no borra. */
 .x.conf{position:static;width:auto;flex:0 0 auto;padding:0 10px;height:32px;
         color:#fff;background:var(--error);border-radius:var(--r);font-size:12px}
+.fpag{display:flex;align-items:center;gap:8px;padding:11px 16px;border-top:1px solid var(--hairline)}
+.fpag button{height:32px;padding:0 10px;border:1px solid var(--hairline);background:transparent;
+  font:700 12px/1 inherit;border-radius:var(--r);cursor:pointer}
+.fpag button:disabled{opacity:.35;cursor:default}
+.fpag span{flex:1;text-align:center;font-size:11px;color:var(--mute)}
 .vacio{padding:20px 16px;font-size:15px;color:var(--mute);text-align:center}
 /* PATRIMONIO */
 .total{padding:28px 16px}
@@ -720,9 +725,10 @@ function rMes(){
       <div class="go">${campo}<button class="btn p" data-conv="${v.id}">${c.destinos?'Anotar':'Convertir'}</button></div></div>`;
   }).join('') : `<div class="vacio">Nada pendiente. Cuando apuntes una aportación aparecerá aquí.</div>`;
 
-  // historial de conversiones, la más reciente arriba; el ✕ deshace entera
-  // (unidades, planos, cuenta y apunte del mes de origen)
-  const hechos = S.mov.filter(x=>x.u!==null).sort((a,b)=> b.f.localeCompare(a.f) || b.id-a.id);
+  // historial de conversiones DEL MES QUE MIRAS, la más reciente arriba: la
+  // lista entera se haría eterna. Navegar de mes enseña las suyas.
+  const hechos = S.mov.filter(x=>x.u!==null && (x.ym || x.f.slice(0,7)) === ymAct)
+    .sort((a,b)=> b.f.localeCompare(a.f) || b.id-a.id);
   $('mHechoTit').hidden = !hechos.length;
   $('mHecho').innerHTML = hechos.length ? '<div class="card">'+hechos.map(v => {
     const d = desajuste(v);
@@ -1122,8 +1128,13 @@ function eSerie(){
   // así, al hacer una foto la curva crece en el acto. Antes leía un array
   // congelado del import y las fotos nuevas no aparecían nunca.
   if (eSel==='total'){
-    const f = [...S.fotos].sort((a,b)=>a.f<b.f?-1:1);
-    return {meses:f.map(x=>x.f.slice(0,7)), saldo:f.map(x=>x.v),
+    // una foto por día (la última manda): mil actualizaciones del mismo día
+    // son un solo punto, no mil. Y las fechas completas viajan con la serie
+    // para que el eje X pueda respetar el tiempo real.
+    const porDia = new Map();
+    [...S.fotos].sort((a,b)=>a.f<b.f?-1:1).forEach(x => porDia.set(x.f, x));
+    const f = [...porDia.values()];
+    return {meses:f.map(x=>x.f.slice(0,7)), fechas:f.map(x=>x.f), saldo:f.map(x=>x.v),
             ap:f.map(()=>null), mk:f.map(()=>null)};
   }
   const largo = D.largo && D.largo[eSel], corta = D.series[eSel];
@@ -1148,7 +1159,14 @@ function rEvo(){
   const ms=s.meses.slice(i0), sa=s.saldo.slice(i0), ap=s.ap.slice(i0), mk=s.mk.slice(i0);
   $('eTitulo').textContent = r.n.trim();
   const W=340,H=200,P=8, min=Math.min(...sa), max=Math.max(...sa), rg=(max-min)||1;
-  const X=i=>P+i*(W-2*P)/Math.max(ms.length-1,1), Y=v=>H-24-(v-min)/rg*(H-24-P);
+  // El eje X respeta el TIEMPO, no el número de puntos: tres fotos seguidas en
+  // una semana se apiñan a la derecha en vez de comerse tres años de historia.
+  // Las series mensuales llevan su fecha de cierre; el punto vivo, la de hoy.
+  const fechas = (s.fechas ? s.fechas.slice(i0)
+    : ms.map((m,idx) => (s.vivo && idx===ms.length-1) ? HOY : m+'-28')).map(f=>+new Date(f));
+  const t0 = fechas[0], tn = fechas[fechas.length-1];
+  const X = i => P + (tn>t0 ? (fechas[i]-t0)/(tn-t0) : i/Math.max(ms.length-1,1))*(W-2*P);
+  const Y=v=>H-24-(v-min)/rg*(H-24-P);
   // el dedo puede estar posado sobre un mes: entonces manda ese, no el último
   GRAF = {ms, sa, X, W, P};
   const foco = (scrub !== null && scrub < ms.length) ? scrub : ms.length-1;
@@ -1229,6 +1247,7 @@ function rEvo(){
 
 /* ════════════ RENDER · FOTOS ════════════ */
 let fotoDel = null;              // índice de la foto a la que se le ha tocado el ✕
+let fotPag = 0;                  // página de la lista de fotos; 0 = las más recientes
 function rFot(){
   $('fMano').innerHTML = Object.entries(S.mano).map(([k,m]) => {
     const d = dias(m.fecha);
@@ -1252,9 +1271,17 @@ function rFot(){
       ? '<b style="color:var(--warning)">Nunca has exportado.</b> Si pierdes este navegador, pierdes todo.'
       : dE>30 ? `<b style="color:var(--warning)">Última copia hace ${dE} días.</b> Toca exportar.`
       : `Última copia hace ${dE} días.`;
-  $('fLista').innerHTML = [...S.fotos].reverse().map((x,i,arr) => {
-    const ant = arr[i+1], d = ant ? x.v-ant.v : null;
-    const idx = S.fotos.length-1-i;      // índice real en S.fotos, no en la lista invertida
+  // la lista va por páginas de 30 para no saturar cuando crezca; las flechas
+  // navegan y la diferencia se calcula contra la lista completa, no la página
+  const todas = [...S.fotos].reverse();
+  const PAG = 30, nPag = Math.max(1, Math.ceil(todas.length/PAG));
+  if (fotPag >= nPag) fotPag = nPag-1;
+  if (fotPag < 0) fotPag = 0;
+  const desde = fotPag*PAG;
+  $('fLista').innerHTML = todas.slice(desde, desde+PAG).map((x,i) => {
+    const iAbs = desde+i;
+    const ant = todas[iAbs+1], d = ant ? x.v-ant.v : null;
+    const idx = S.fotos.length-1-iAbs;   // índice real en S.fotos, no en la lista invertida
     // solo las fotos tuyas se pueden quitar: las de la hoja son historia importada
     const quitar = x.hoja ? `<span style="flex:0 0 32px"></span>`
       : fotoDel===idx ? `<button class="x conf" data-fok="${idx}">¿quitar?</button>`
@@ -1262,7 +1289,11 @@ function rFot(){
     return `<div class="ft${x.hoja?'':' nueva'}">
       <span class="fh">${x.f}<small>${x.hoja?'de la hoja':'foto tuya'}</small></span>
       <span class="eu num">${eur0(x.v)}</span>
-      <span class="d num ${d===null?'':d>=0?'up':'dn'}">${d===null?'·':(d>=0?'+':'')+eur0(d)}</span>${quitar}</div>`; }).join('');
+      <span class="d num ${d===null?'':d>=0?'up':'dn'}">${d===null?'·':(d>=0?'+':'')+eur0(d)}</span>${quitar}</div>`; }).join('')
+  + (nPag>1 ? `<div class="fpag">
+      <button data-fpag="1" ${fotPag>=nPag-1?'disabled':''}>‹ más antiguas</button>
+      <span>${desde+1}–${Math.min(desde+PAG, todas.length)} de ${todas.length}</span>
+      <button data-fpag="-1" ${fotPag<=0?'disabled':''}>más recientes ›</button></div>` : '');
 }
 
 /* ════════════ RENDER GLOBAL ════════════ */
@@ -1404,6 +1435,7 @@ document.addEventListener('click', e => {
     Object.values(S.mano).forEach(m=>m.fecha=HOY);
     S.fotos.push({f:HOY, v:Math.round(P.total), hoja:false});
     render(); return; }
+  if (b.dataset.fpag){ fotPag += +b.dataset.fpag; rFot(); return; }
   // quitar foto: primer toque pregunta, segundo quita; tocar otra cosa lo anula
   if (b.dataset.fdel !== undefined){ fotoDel = +b.dataset.fdel; rFot(); return; }
   if (b.dataset.fok !== undefined){
