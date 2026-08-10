@@ -270,6 +270,11 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 .hide .note b,.hide .chapter .foot b,.hide .n2 .nm small,.hide .fr .nm small,
 .hide .fr .n,.hide .dl b,.hide .dl em,.hide .chapter .l b,.hide .chapter .l .pc,
 .hide #eTabla td:not(:first-child),.hide #eDelta,.hide .dos .n{filter:blur(7px)}
+/* los números a 34-48px necesitan un desenfoque a su medida: con 7px los dígitos
+   aún se adivinaban (avisado por el usuario el 10/08/2026) */
+.hide .total .v,.hide .restante .v,.hide .cab .v,.hide .fchapter .v,
+.hide #pRend .l.big b,.hide .chapter .big span:last-child{filter:blur(18px)}
+.hide .dos .n{filter:blur(10px)}
 </style>
 </head>
 <body>
