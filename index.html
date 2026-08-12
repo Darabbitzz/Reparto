@@ -793,6 +793,7 @@ function rMes(){
    fiable = no se usa: esa rama solo proyecta aportaciones, y lo dice. */
 const PRO_RAMAS = [
   {id:'todo', n:'Todo (invertido + renta fija)'},
+  {id:'invertido', n:'Patrimonio invertido (sin renta fija)'},
   {id:'rf', n:'   Renta fija (el bote)'},
   {id:'rv', n:'   Renta variable en TR'},
   {id:'world', n:'      · Core MSCI World'},
@@ -840,7 +841,8 @@ function bandaProy(v0, aport, tir, meses){
 function rPro(){
   const r = PRO_RAMAS.find(x=>x.id===prSel), meses = prN*12;
   $('prTit').textContent = r.n.trim() + ' · en ' + prN + ' años';
-  const ramas = prSel==='todo' ? PRO_TODO : [prSel];
+  const ramas = prSel==='todo' ? PRO_TODO
+    : prSel==='invertido' ? PRO_TODO.filter(x=>x!=='rf') : [prSel];
   const partes = ramas.map(id => ({id, ...ramaProy(id)}));
   const sinPrecio = partes.filter(p => p.v0 === null).map(p => PRO_RAMAS.find(x=>x.id===p.id).n.trim());
   const usables = partes.filter(p => p.v0 !== null);
@@ -876,9 +878,10 @@ function rPro(){
     <path d="${zona}" fill="var(--primary)" opacity="0.14"/>
     <path d="${linea(bajo)}" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
     <path d="${linea(alto)}" fill="none" stroke="var(--primary)" stroke-width="2"/>${lObj}${ejes}`;
-  // desglose por activo, solo en la vista Todo
-  $('prDesgTit').hidden = prSel !== 'todo';
-  $('prDesg').innerHTML = prSel !== 'todo' ? '' : partes.map(p => {
+  // desglose por activo en las vistas agregadas
+  const conDesg = prSel === 'todo' || prSel === 'invertido';
+  $('prDesgTit').hidden = !conDesg;
+  $('prDesg').innerHTML = !conDesg ? '' : partes.map(p => {
     const n = PRO_RAMAS.find(x=>x.id===p.id).n.trim();
     if (p.v0 === null) return `<div class="fr"><span class="nm">${n}<small>sin precio ahora mismo</small></span><span class="n na">—</span></div>`;
     const b = bandaProy(p.v0, p.aport, p.tir, meses);
@@ -886,7 +889,8 @@ function rPro(){
         p.tir===null ? 'sin TIR fiable: solo aportaciones' : 'TIR '+(p.tir>=0?'+':'')+p.tir.toFixed(1)+' %'}</small></span>
       <span class="n num">${eur0(b.bajo[meses])} – ${eur0(b.alto[meses])}</span></div>`; }).join('');
   $('prNota').textContent = prSel === 'todo'
-    ? 'El fondo de emergencia, la liquidez y el yolo no se proyectan: no son inversión.' : '';
+    ? 'El fondo de emergencia, la liquidez y el yolo no se proyectan: no son inversión.'
+    : prSel === 'invertido' ? 'Solo lo que cotiza: sin la renta fija, que es el bote de la casa.' : '';
 }
 
 /* ── la racha del gasto de más, VIVA: sustituye a la línea congelada que
