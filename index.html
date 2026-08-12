@@ -122,6 +122,11 @@ section{display:none} section.on{display:block}
 .x{position:absolute;top:0;right:0;width:36px;height:36px;background:transparent;border:0;
    color:var(--mute);font-size:15px;font-weight:700;cursor:pointer}
 .x.est{position:static;width:32px;height:32px;flex:0 0 32px}
+/* la racha del gasto de más: una barrita por mes, roja si te pasaste */
+.rbar{display:flex;align-items:flex-end;gap:4px;height:44px;margin-top:18px}
+.rbar i{flex:1;background:var(--error);display:block;min-height:3px}
+.rbar i.ok{background:var(--primary);height:4px}
+.rbarLab{display:flex;justify-content:space-between;font-size:10px;color:var(--on-dark-mute);margin-top:4px}
 /* barra del bote de la casa: relleno verde y marcas en los hitos 25/50/75 */
 .casaBar{position:relative;height:14px;background:var(--surface-soft);margin:2px 16px 12px;overflow:hidden}
 .casaBar b{position:absolute;left:0;top:0;bottom:0;background:var(--primary)}
@@ -332,7 +337,9 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     <div class="l"><span>Entró al fondo de emergencia</span><span class="num" id="shEntro">—</span></div>
     <div class="l"><span>El fondo queda en</span><span class="num" id="shFondo">—</span></div>
     <div class="l big"><span>Te pasaste</span><span class="num" id="shBruto">—</span></div>
-    <div class="foot">Racha hasta jul-26: <b>5 de 6 meses</b> · retirado <b>−1.987 €</b>.</div>
+    <div class="rbar" id="shBarras"></div>
+    <div class="rbarLab" id="shBarrasLab"></div>
+    <div class="foot" id="shRacha"></div>
   </div>
   <div class="eyebrow">Se acumula · no se invierte</div>
   <div class="card" id="mAcum"></div>
@@ -698,6 +705,7 @@ function rMes(){
   $('shEntro').textContent = fe===null?raya:eur(fe);
   $('shBruto').textContent = m.sobre===null?raya:eur(m.sobre);
   $('shFondo').textContent = eur(S.cuentaTR.comp.fe);
+  rRacha();
 
   // el bolsillo YA lleva dentro lo de este mes: aplicarMes() lo metió al cobrar
   const delMes = c => (m.aplicado && m.aplicado[c.id]) || 0;
@@ -753,6 +761,46 @@ function rMes(){
         ${d.d>0?'más':'menos'}. Revisa las unidades: eso no es ganancia ni pérdida.</small>`:''}</span>
       <span class="eu num">${v.u?uds(v.u):raya}</span>
       <button class="x est" data-del="${v.id}">✕</button></div>`; }).join('')+'</div>' : '';
+}
+
+/* ── la racha del gasto de más, VIVA: sustituye a la línea congelada que
+   decía «Racha hasta jul-26: 5 de 6 meses» escrita a mano. El histórico usa
+   lo que BAJÓ el fondo cada mes (la serie solo guarda el neto, igual que
+   medía la línea vieja); los meses declarados en la app usan tu «te pasaste»
+   de verdad. Un mes sin dato no cuenta ni a favor ni en contra. */
+function mesesSobre(){
+  const out = new Map();                            // ym → euros de más (0 = mes limpio)
+  const s = D.series.fe;
+  if (s) D.meses.forEach((ym,i) => { if (i>0){
+    const d = s.saldo[i]-s.saldo[i-1];
+    out.set(ym, d < -0.005 ? -d : 0); } });
+  Object.entries(S.meses).forEach(([ym,x]) => {
+    if (x.sobre !== null && x.sobre !== undefined) out.set(ym, Math.max(x.sobre, 0));
+  });
+  return [...out.entries()].sort((a,b)=>a[0]<b[0]?-1:1);
+}
+function rRacha(){
+  const ent = mesesSobre();
+  if (!ent.length){
+    $('shBarras').innerHTML = ''; $('shBarrasLab').innerHTML = '';
+    $('shRacha').innerHTML = 'Sin meses medidos todavía: declara el gasto de más al cerrar el mes.';
+    return;
+  }
+  const ult = ent.slice(-12), maxV = Math.max(...ult.map(([,v])=>v), 1);
+  $('shBarras').innerHTML = ult.map(([ym,v]) => v > 0.005
+    ? `<i style="height:${Math.max(v/maxV*44, 3).toFixed(0)}px"></i>`
+    : `<i class="ok"></i>`).join('');
+  $('shBarrasLab').innerHTML = `<span>${et(ult[0][0])}</span><span>${et(ult[ult.length-1][0])}</span>`;
+  // racha actual (desde el último mes con dato hacia atrás) y mejor racha limpia
+  let actual = 0; const malo = ent[ent.length-1][1] > 0.005;
+  for (let i = ent.length-1; i >= 0 && (ent[i][1] > 0.005) === malo; i--) actual++;
+  let mejor = 0, run = 0;
+  ent.forEach(([,v]) => { run = v > 0.005 ? 0 : run+1; if (run > mejor) mejor = run; });
+  const quitado = ult.reduce((s,[,v])=>s+v, 0);
+  $('shRacha').innerHTML = (malo
+    ? `Llevas <b>${actual} ${actual===1?'mes':'meses seguidos'} pasándote</b> · mejor racha limpia: <b>${mejor}</b>.`
+    : `Llevas <b>${actual} ${actual===1?'mes limpio':'meses limpios'}</b> · mejor racha: <b>${mejor}</b>.`)
+    + ` Quitado al fondo en estos ${ult.length} meses: <b>−${eur0(quitado)}</b>.`;
 }
 
 /* ════════════ RENDER · PATRIMONIO ════════════ */
