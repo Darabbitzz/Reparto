@@ -240,6 +240,7 @@ button.fr{cursor:pointer;font:inherit}
 .cab .d{margin-top:4px;font-size:15px;color:var(--mute)}
 .cab .d .up{color:var(--primary-dark);font-weight:700} .cab .d .dn{color:var(--error);font-weight:700}
 #g{display:block;width:100%;height:200px;margin-top:12px;touch-action:none}
+#gp{display:block;width:100%;height:200px;margin-top:12px}
 .gx{font-size:10px;fill:var(--mute)}
 .cab .d .fecha{font-weight:700;color:var(--ink)}
 .dos{display:flex;margin:16px 16px 0;border:1px solid var(--hairline);border-radius:var(--r)}
@@ -284,7 +285,7 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 .hide .note b,.hide .chapter .foot b,.hide .n2 .nm small,.hide .fr .nm small,
 .hide .fr .n,.hide .dl b,.hide .dl em,.hide .chapter .l b,.hide .chapter .l .pc,
 .hide #pRend .l span span,
-.hide #eTabla td:not(:first-child),.hide #eDelta,.hide .dos .n{filter:blur(7px)}
+.hide #eTabla td:not(:first-child),.hide #eDelta,.hide #prDet,.hide .dos .n{filter:blur(7px)}
 /* los números a 34-48px necesitan un desenfoque a su medida: con 7px los dígitos
    aún se adivinaban (avisado por el usuario el 10/08/2026) */
 .hide .total .v,.hide .restante .v,.hide .cab .v,.hide .fchapter .v,
@@ -301,7 +302,7 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 </div>
 <div class="tabs" id="tabs">
   <button data-s="mes" class="on">Mes</button><button data-s="pat">Patrimonio</button>
-  <button data-s="evo">Evolución</button><button data-s="fot">Fotos</button>
+  <button data-s="evo">Evolución</button><button data-s="pro">Futuro</button><button data-s="fot">Fotos</button>
 </div>
 
 <!-- ══════ MES ══════ -->
@@ -430,6 +431,28 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     <tbody id="eTabla"></tbody></table>
   </div>
   <div class="note" id="ePie"></div>
+</section>
+
+<!-- ══════ FUTURO ══════ -->
+<section id="s-pro">
+  <div class="sel"><select id="prQue"></select></div>
+  <div class="per" id="prAnios">
+    <button data-a="3">3 años</button><button data-a="5" class="on">5 años</button>
+    <button data-a="10">10 años</button>
+  </div>
+  <div class="cab">
+    <div class="k" id="prTit"></div>
+    <div class="v num" id="prValor">—</div>
+    <div class="d" id="prDet"></div>
+  </div>
+  <svg id="gp" viewBox="0 0 340 200" preserveAspectRatio="none"></svg>
+  <div class="aviso" style="margin:16px"><b>Esto no es una predicción</b>Es tu pasado repetido:
+    la aportación es la media de tus últimos 6 meses en cada rama y la rentabilidad, tu TIR
+    desde el origen (la renta fija, al 2 % declarado). La banda va de «solo lo que pongas tú»
+    a «si rinde como tu histórico». El futuro no tiene por qué parecerse.</div>
+  <div class="eyebrow" id="prDesgTit">Desglose por activo</div>
+  <div class="card" id="prDesg"></div>
+  <div class="note" id="prNota"></div>
 </section>
 
 <!-- ══════ FOTOS ══════ -->
@@ -761,6 +784,109 @@ function rMes(){
         ${d.d>0?'más':'menos'}. Revisa las unidades: eso no es ganancia ni pérdida.</small>`:''}</span>
       <span class="eu num">${v.u?uds(v.u):raya}</span>
       <button class="x est" data-del="${v.id}">✕</button></div>`; }).join('')+'</div>' : '';
+}
+
+/* ════════════ RENDER · FUTURO (proyección honesta, en banda) ════════════
+   No predice: repite tu pasado. Cada rama arranca de su valor de HOY, aporta
+   cada mes la MEDIA de tus últimos 6 meses reales, y rinde entre 0 % («solo
+   lo que pongas») y tu TIR desde el origen. TIR con menos de 12 meses = no
+   fiable = no se usa: esa rama solo proyecta aportaciones, y lo dice. */
+const PRO_RAMAS = [
+  {id:'todo', n:'Todo (invertido + renta fija)'},
+  {id:'rf', n:'   Renta fija (el bote)'},
+  {id:'rv', n:'   Renta variable en TR'},
+  {id:'world', n:'      · Core MSCI World'},
+  {id:'nasdaq', n:'      · Nasdaq 100'},
+  {id:'fin', n:'   Finizens'},
+  {id:'cri', n:'   Cripto'},
+  {id:'btc', n:'      · Bitcoin'},
+  {id:'eth', n:'      · Ethereum'},
+  {id:'oro', n:'   Oro'},
+  {id:'pens', n:'   Plan de pensiones'},
+];
+const PRO_TODO = ['rf','rv','fin','cri','oro','pens'];
+let prSel = 'todo', prN = 5;
+$('prQue').innerHTML = PRO_RAMAS.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
+function entradasDe(id){
+  if (id === 'rf') return entradasRf();
+  const ent = new Map();
+  const largo = D.largo && D.largo[id], corta = D.series[id];
+  const ms = largo ? largo.meses : D.meses, ap = largo ? largo.ap : (corta ? corta.ap : null);
+  if (ap && ms) ms.forEach((ym,i) => { const v = ap[i];
+    if (i>0 && v !== null && v !== undefined) ent.set(ym, Math.max(v,0)); });
+  Object.keys(S.meses).forEach(ym => { const v = apDe(id, ym); if (v > 0.005) ent.set(ym, v); });
+  return [...ent.entries()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-6);
+}
+function ramaProy(id){
+  if (id === 'rf'){
+    const e = entradasRf();
+    return { v0: S.cuentaTR.comp.rf, tir: 2,
+             aport: e.length ? e.reduce((s,[,v])=>s+v,0)/e.length : 0 };
+  }
+  const o = origenVivo()[id] || {};
+  const e = entradasDe(id);
+  const fiable = o.tir !== null && o.tir !== undefined && (o.meses||0) >= 12;
+  return { v0: o.val ?? null, tir: fiable ? o.tir : null,
+           aport: e.length ? e.reduce((s,[,v])=>s+v,0)/e.length : 0 };
+}
+// banda mes a mes: suelo a 0 % de rentabilidad, techo con la TIR compuesta
+function bandaProy(v0, aport, tir, meses){
+  const rm = tir === null ? 0 : Math.pow(1 + tir/100, 1/12) - 1;
+  const a = [v0], b = [v0];
+  for (let i=1; i<=meses; i++){ a.push(a[i-1] + aport); b.push(b[i-1]*(1+rm) + aport); }
+  // con TIR negativa el «techo» queda por debajo: se ordena y listo
+  return { bajo: a.map((v,i)=>Math.min(v, b[i])), alto: a.map((v,i)=>Math.max(v, b[i])) };
+}
+function rPro(){
+  const r = PRO_RAMAS.find(x=>x.id===prSel), meses = prN*12;
+  $('prTit').textContent = r.n.trim() + ' · en ' + prN + ' años';
+  const ramas = prSel==='todo' ? PRO_TODO : [prSel];
+  const partes = ramas.map(id => ({id, ...ramaProy(id)}));
+  const sinPrecio = partes.filter(p => p.v0 === null).map(p => PRO_RAMAS.find(x=>x.id===p.id).n.trim());
+  const usables = partes.filter(p => p.v0 !== null);
+  const hayDato = usables.some(p => p.v0 > 0.005 || p.aport > 0.005);
+  if (!hayDato){
+    $('prValor').textContent = raya; $('prDet').textContent = ''; $('gp').innerHTML = '';
+    $('prDesg').innerHTML = `<div class="vacio">Sin datos que proyectar: importa tu copia o cobra un mes.</div>`;
+    $('prDesgTit').hidden = false; $('prNota').textContent = ''; return;
+  }
+  const suma = arr => arr.reduce((s,c) => c.map((v,i)=>v+(s[i]||0)), []);
+  const bandas = usables.map(p => bandaProy(p.v0, p.aport, p.tir, meses));
+  const bajo = suma(bandas.map(b=>b.bajo)), alto = suma(bandas.map(b=>b.alto));
+  const marca = sinPrecio.length ? ' +' : '';
+  $('prValor').textContent = eur0(bajo[meses]) + ' – ' + eur0(alto[meses]) + marca;
+  const aportTot = usables.reduce((s,p)=>s+p.aport,0);
+  $('prDet').innerHTML = `hoy: <b>${eur0(bajo[0])}${marca}</b> · aportando ${eur0(aportTot)} al mes` +
+    (sinPrecio.length ? `<br>sin precio ahora: ${sinPrecio.join(', ')} (fuera de la banda)` : '');
+  // la banda: suelo, techo y el relleno entre ambos
+  const W=340, H=200, P=8, min=bajo[0], max=Math.max(alto[meses], bajo[meses]);
+  const X = i => P + i*(W-2*P)/meses, Y = v => H-24-(v-min)/((max-min)||1)*(H-24-P);
+  const linea = arr => arr.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ');
+  const zona = alto.map((v,i)=>(i?'L':'M')+X(i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ')
+    + ' ' + [...bajo].reverse().map((v,i)=>'L'+X(meses-i).toFixed(1)+' '+Y(v).toFixed(1)).join(' ') + ' Z';
+  let ejes = '';
+  for (let a=0; a<=prN; a++){ const i=a*12;
+    ejes += `<text class="gx" x="${X(i)}" y="${H-6}" text-anchor="${a===0?'start':a===prN?'end':'middle'}">${a===0?'hoy':'+'+a+'a'}</text>`; }
+  // el objetivo de la casa, si se proyecta la renta fija y cae dentro del lienzo
+  const obj = S.config.objetivoCasa;
+  const lObj = (prSel==='rf' && obj && obj>min && obj<max)
+    ? `<line x1="${P}" y1="${Y(obj)}" x2="${W-P}" y2="${Y(obj)}" stroke="var(--warning)" stroke-width="1.5" stroke-dasharray="4 3"/>
+       <text class="gx" x="${W-P}" y="${Y(obj)-4}" text-anchor="end">objetivo</text>` : '';
+  $('gp').innerHTML = `<line x1="${P}" y1="${H-24}" x2="${W-P}" y2="${H-24}" stroke="var(--hairline)"/>
+    <path d="${zona}" fill="var(--primary)" opacity="0.14"/>
+    <path d="${linea(bajo)}" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
+    <path d="${linea(alto)}" fill="none" stroke="var(--primary)" stroke-width="2"/>${lObj}${ejes}`;
+  // desglose por activo, solo en la vista Todo
+  $('prDesgTit').hidden = prSel !== 'todo';
+  $('prDesg').innerHTML = prSel !== 'todo' ? '' : partes.map(p => {
+    const n = PRO_RAMAS.find(x=>x.id===p.id).n.trim();
+    if (p.v0 === null) return `<div class="fr"><span class="nm">${n}<small>sin precio ahora mismo</small></span><span class="n na">—</span></div>`;
+    const b = bandaProy(p.v0, p.aport, p.tir, meses);
+    return `<div class="fr"><span class="nm">${n}<small>hoy ${eur0(p.v0)} · +${eur0(p.aport)}/mes · ${
+        p.tir===null ? 'sin TIR fiable: solo aportaciones' : 'TIR '+(p.tir>=0?'+':'')+p.tir.toFixed(1)+' %'}</small></span>
+      <span class="n num">${eur0(b.bajo[meses])} – ${eur0(b.alto[meses])}</span></div>`; }).join('');
+  $('prNota').textContent = prSel === 'todo'
+    ? 'El fondo de emergencia, la liquidez y el yolo no se proyectan: no son inversión.' : '';
 }
 
 /* ── la racha del gasto de más, VIVA: sustituye a la línea congelada que
@@ -1424,7 +1550,7 @@ function render(){
   const pos = a && a.selectionStart != null ? a.selectionStart : null;
   const txt = a && a.tagName === 'INPUT' ? a.value : null;
 
-  rMes(); rPat(); rEvo(); rFot(); save();
+  rMes(); rPat(); rEvo(); rPro(); rFot(); save();
 
   if (id || marca){
     const n = id ? $(id)
@@ -1466,7 +1592,7 @@ document.addEventListener('click', e => {
   // el «¿quitar?» de una foto caduca en cuanto tocas cualquier otra cosa
   if (fotoDel !== null && b.dataset.fok === undefined && b.dataset.fdel === undefined) fotoDel = null;
   if (b.dataset.s){ document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
-    ['mes','pat','evo','fot'].forEach(s=>$('s-'+s).classList.toggle('on', s===b.dataset.s)); return; }
+    ['mes','pat','evo','pro','fot'].forEach(s=>$('s-'+s).classList.toggle('on', s===b.dataset.s)); return; }
   if (b.id==='eye'){ document.body.classList.toggle('hide');
     b.textContent = document.body.classList.contains('hide')?'Mostrar':'Ocultar'; return; }
   if (b.id==='mPrev'||b.id==='mNext'){ let [y,m]=ymAct.split('-').map(Number);
@@ -1617,6 +1743,10 @@ $('fFile').onchange = e => {
 })();
 
 $('eQue').onchange = e => { eSel=e.target.value; scrub=null; rEvo(); };
+$('prQue').onchange = e => { prSel = e.target.value; rPro(); };
+document.querySelectorAll('#prAnios button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('#prAnios button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); prN = +b.dataset.a; rPro(); });
 document.querySelectorAll('#ePer button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#ePer button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); ePer=+b.dataset.p; scrub=null; rEvo(); });
