@@ -440,12 +440,18 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     <button data-a="3">3 años</button><button data-a="5" class="on">5 años</button>
     <button data-a="10">10 años</button>
   </div>
+  <div class="card" style="margin:12px 16px 0">
+    <div class="vm"><span class="nm">¿Y si aporto al mes…?<small>vacío = tu media real de los últimos 6 meses</small></span>
+      <input type="text" inputmode="decimal" id="prAporte" placeholder="tu media"></div>
+  </div>
   <div class="cab">
     <div class="k" id="prTit"></div>
     <div class="v num" id="prValor">—</div>
     <div class="d" id="prDet"></div>
   </div>
   <svg id="gp" viewBox="0 0 340 200" preserveAspectRatio="none"></svg>
+  <div class="eyebrow" id="prFireTit" hidden>¿Cuándo llegarías al FIRE?</div>
+  <div class="card" id="prFire" hidden></div>
   <div class="aviso" style="margin:16px"><b>Esto no es una predicción</b>Es tu pasado repetido:
     la aportación es la media de tus últimos 6 meses en cada rama y la rentabilidad, tu TIR
     desde el origen (la renta fija, al 2 % declarado). La banda va de «solo lo que pongas tú»
@@ -500,6 +506,7 @@ const SEED = {
   config: {
     pInv: 70, pFE: 40, pens: 125,
     objetivoCasa: null,                 // lo declara el usuario; la app viaja sin él
+    objetivoFire: null,                 // el número FIRE, también declarado
     cats: [
       {id:'rf',  n:'Renta fija',     pct:65,   acumula:true,  sub:'ahorro finalista · no se invierte'},
       {id:'rv',  n:'Renta variable', pct:17.5, acumula:false, activos:['Core MSCI World','Nasdaq 100','Finizens']},
@@ -576,6 +583,8 @@ const dias = f => Math.round((new Date(HOY)-new Date(f))/864e5);
 // y tecleabas «06» queriendo «60»); el teclado español mete coma decimal y
 // parseFloat('31,4') daría 31 en silencio. TODO número tecleado pasa por aquí.
 const dec = v => parseFloat(String(v).trim().replace(',','.'));
+const enMeses = m => { const d = new Date(HOY); d.setMonth(d.getMonth()+m);
+  return MESC[String(d.getMonth()+1).padStart(2,'0')]+'-'+String(d.getFullYear()).slice(2); };
 const raya = '—';
 const MESN=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 let ymAct = HOY.slice(0,7);
@@ -806,7 +815,7 @@ const PRO_RAMAS = [
   {id:'pens', n:'   Plan de pensiones'},
 ];
 const PRO_TODO = ['rf','rv','fin','cri','oro','pens'];
-let prSel = 'todo', prN = 5;
+let prSel = 'todo', prN = 5, prAport = null;   // prAport = el «¿y si aporto X?» tecleado
 $('prQue').innerHTML = PRO_RAMAS.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
 function entradasDe(id){
   if (id === 'rf') return entradasRf();
@@ -852,14 +861,22 @@ function rPro(){
     $('prDesg').innerHTML = `<div class="vacio">Sin datos que proyectar: importa tu copia o cobra un mes.</div>`;
     $('prDesgTit').hidden = false; $('prNota').textContent = ''; return;
   }
+  // «¿y si aporto X?»: escala la aportación de cada rama manteniendo tu mezcla
+  const mediaTot = usables.reduce((s,p)=>s+p.aport,0);
+  if (prAport !== null){
+    if (mediaTot > 0.005) usables.forEach(p => p.aport *= prAport/mediaTot);
+    else if (usables.length) usables.forEach(p => p.aport = prAport/usables.length);
+  }
+  $('prAporte').placeholder = eur0(mediaTot) + ' (tu media)';
   const suma = arr => arr.reduce((s,c) => c.map((v,i)=>v+(s[i]||0)), []);
   const bandas = usables.map(p => bandaProy(p.v0, p.aport, p.tir, meses));
   const bajo = suma(bandas.map(b=>b.bajo)), alto = suma(bandas.map(b=>b.alto));
   const marca = sinPrecio.length ? ' +' : '';
   $('prValor').textContent = eur0(bajo[meses]) + ' – ' + eur0(alto[meses]) + marca;
   const aportTot = usables.reduce((s,p)=>s+p.aport,0);
-  $('prDet').innerHTML = `hoy: <b>${eur0(bajo[0])}${marca}</b> · aportando ${eur0(aportTot)} al mes` +
-    (sinPrecio.length ? `<br>sin precio ahora: ${sinPrecio.join(', ')} (fuera de la banda)` : '');
+  $('prDet').innerHTML = `hoy: <b>${eur0(bajo[0])}${marca}</b> · aportando ${eur0(aportTot)} al mes`
+    + (prAport !== null ? ` <em style="font-style:normal;color:var(--warning)">(simulado; tu media: ${eur0(mediaTot)})</em>` : '')
+    + (sinPrecio.length ? `<br>sin precio ahora: ${sinPrecio.join(', ')} (fuera de la banda)` : '');
   // la banda: suelo, techo y el relleno entre ambos
   const W=340, H=200, P=8, min=bajo[0], max=Math.max(alto[meses], bajo[meses]);
   const X = i => P + i*(W-2*P)/meses, Y = v => H-24-(v-min)/((max-min)||1)*(H-24-P);
@@ -869,15 +886,40 @@ function rPro(){
   let ejes = '';
   for (let a=0; a<=prN; a++){ const i=a*12;
     ejes += `<text class="gx" x="${X(i)}" y="${H-6}" text-anchor="${a===0?'start':a===prN?'end':'middle'}">${a===0?'hoy':'+'+a+'a'}</text>`; }
-  // el objetivo de la casa, si se proyecta la renta fija y cae dentro del lienzo
-  const obj = S.config.objetivoCasa;
-  const lObj = (prSel==='rf' && obj && obj>min && obj<max)
+  // el objetivo (la casa en renta fija, el FIRE en el invertido) si cae en el lienzo
+  const obj = prSel==='rf' ? S.config.objetivoCasa : prSel==='invertido' ? S.config.objetivoFire : null;
+  const lObj = (obj && obj>min && obj<max)
     ? `<line x1="${P}" y1="${Y(obj)}" x2="${W-P}" y2="${Y(obj)}" stroke="var(--warning)" stroke-width="1.5" stroke-dasharray="4 3"/>
-       <text class="gx" x="${W-P}" y="${Y(obj)-4}" text-anchor="end">objetivo</text>` : '';
+       <text class="gx" x="${W-P}" y="${Y(obj)-4}" text-anchor="end">${prSel==='rf'?'objetivo':'FIRE'}</text>` : '';
   $('gp').innerHTML = `<line x1="${P}" y1="${H-24}" x2="${W-P}" y2="${H-24}" stroke="var(--hairline)"/>
     <path d="${zona}" fill="var(--primary)" opacity="0.14"/>
     <path d="${linea(bajo)}" fill="none" stroke="var(--ink)" stroke-width="1.5"/>
     <path d="${linea(alto)}" fill="none" stroke="var(--primary)" stroke-width="2"/>${lObj}${ejes}`;
+  // FIRE: solo en la vista del invertido. Busca dónde cruzan las dos curvas
+  // el número declarado, mirando hasta 50 años aunque la gráfica enseñe menos.
+  $('prFireTit').hidden = $('prFire').hidden = prSel !== 'invertido';
+  if (prSel === 'invertido'){
+    const fire = S.config.objetivoFire;
+    let fh = `<div class="vm"><span class="nm">Tu número FIRE<small>el patrimonio invertido con el que te plantarías</small></span>
+      <input type="text" inputmode="numeric" placeholder="teclea" id="iFire" value="${fire ?? ''}"></div>`;
+    if (fire){
+      if (bajo[0] >= fire){
+        fh += `<div class="fr"><span class="nm"><b>Ya lo pasaste.</b></span><span class="n up">✔</span></div>`;
+      } else {
+        const M = 600;                                     // 50 años de búsqueda
+        const bl = usables.map(p => bandaProy(p.v0, p.aport, p.tir, M));
+        const bajoL = suma(bl.map(b=>b.bajo)), altoL = suma(bl.map(b=>b.alto));
+        const cruce = arr => { for (let i=1;i<=M;i++) if (arr[i]>=fire) return i; return null; };
+        const cr = cruce(altoL), cl = cruce(bajoL);
+        const rango = cr===null ? 'a más de 50 años' : cl===null
+          ? `${enMeses(cr)} si rinde como tu histórico · solo aportando, a más de 50 años`
+          : cr===cl ? enMeses(cr) : `entre ${enMeses(cr)} y ${enMeses(cl)}`;
+        fh += `<div class="fr"><span class="nm">Llegarías<small>de «si rinde como tu histórico» a «solo lo que pongas»</small></span>
+          <span class="n num">${rango}</span></div>`;
+      }
+    }
+    $('prFire').innerHTML = fh;
+  }
   // desglose por activo en las vistas agregadas
   const conDesg = prSel === 'todo' || prSel === 'invertido';
   $('prDesgTit').hidden = !conDesg;
@@ -1017,8 +1059,6 @@ function entradasRf(){
 function rCasa(){
   const obj = S.config.objetivoCasa ?? null;
   const rf = S.cuentaTR.comp.rf;
-  const fEt = meses => { const d = new Date(HOY); d.setMonth(d.getMonth()+meses);
-    return MESC[String(d.getMonth()+1).padStart(2,'0')]+'-'+String(d.getFullYear()).slice(2); };
   let h = `<div class="vm"><span class="nm">Objetivo<small>lo que quieres juntar para la entrada</small></span>
     <input type="text" inputmode="numeric" placeholder="teclea" id="iObjCasa" value="${obj ?? ''}"></div>`;
   if (!obj){
@@ -1044,7 +1084,7 @@ function rCasa(){
       const lento = media(orden.slice(0, tercio)), rapido = media(orden.slice(-tercio));
       const mRap = rapido>0.005 ? Math.ceil(falta/rapido) : null;
       const mLen = lento>0.005 ? Math.ceil(falta/lento) : null;
-      const f = m => m===null || m>240 ? null : fEt(m);
+      const f = m => m===null || m>240 ? null : enMeses(m);
       const fr = f(mRap), fl = f(mLen);
       const rango = fr===null ? 'sin fecha a este ritmo' : fl===null ? `${fr} o más allá` : fr===fl ? fr : `${fr} – ${fl}`;
       h += `<div class="fr"><span class="nm">Llegarías<small>faltan ${eur0(falta)} · tus últimos ${vals.length} meses
@@ -1589,6 +1629,12 @@ document.addEventListener('input', e => {
     renderPronto(); return; }
   if (t.id==='iObjCasa'){ const v=dec(t.value);
     S.config.objetivoCasa = isFinite(v)&&v>0 ? v : null;
+    renderPronto(); return; }
+  if (t.id==='iFire'){ const v=dec(t.value);
+    S.config.objetivoFire = isFinite(v)&&v>0 ? v : null;
+    renderPronto(); return; }
+  if (t.id==='prAporte'){ const v=dec(t.value);
+    prAport = isFinite(v)&&v>=0 ? v : null;    // vacío = tu media real
     renderPronto(); }
 });
 document.addEventListener('click', e => {
