@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  actions: write        # para lanzar el despliegue de Pages tras el commit
 
 concurrency:
   group: precios
@@ -42,9 +43,11 @@ jobs:
       # El script ya sale sin escribir si no cambió nada, así que este `git diff --quiet`
       # es la segunda red: no ensuciar el historial con un commit diario idéntico.
       - name: Commit si algo cambió
+        id: commit
         run: |
           if git diff --quiet -- precios.json; then
             echo "sin cambios en precios.json"
+            echo "hubo=no" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           git config user.name  "github-actions[bot]"
@@ -52,3 +55,15 @@ jobs:
           git add precios.json
           git commit -m "precios: cierre de $(node -e "console.log(require('./precios.json').cierreDe)")"
           git push
+          echo "hubo=si" >> "$GITHUB_OUTPUT"
+
+      # Los pushes hechos con el token de Actions NO disparan otros workflows
+      # (regla anti-recursión de GitHub), así que el commit diario del precio
+      # nunca llegaba a la web: se quedaba en el repo hasta el siguiente push
+      # a mano (cazado el 12/08/2026: la web servía precios del día 7).
+      # workflow_dispatch es la excepción documentada a esa regla.
+      - name: Desplegar la web con los precios nuevos
+        if: steps.commit.outputs.hubo == 'si'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pages.yml --repo ${{ github.repository }}
