@@ -122,6 +122,10 @@ section{display:none} section.on{display:block}
 .x{position:absolute;top:0;right:0;width:36px;height:36px;background:transparent;border:0;
    color:var(--mute);font-size:15px;font-weight:700;cursor:pointer}
 .x.est{position:static;width:32px;height:32px;flex:0 0 32px}
+/* barra del bote de la casa: relleno verde y marcas en los hitos 25/50/75 */
+.casaBar{position:relative;height:14px;background:var(--surface-soft);margin:2px 16px 12px;overflow:hidden}
+.casaBar b{position:absolute;left:0;top:0;bottom:0;background:var(--primary)}
+.casaBar i.h{position:absolute;top:0;bottom:0;width:2px;background:var(--canvas)}
 /* selector porcentual/autobalance del mes */
 .modosel{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 4px}
 .modosel button{flex:1;height:32px;border:1px solid var(--hairline);background:transparent;
@@ -366,6 +370,11 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
     y su total con <b>Todo lo que hay en TR</b>. El plan de pensiones no sale aquí: sus 125 €
     van del banco al plan sin pasar por Trade Republic. Finizens y Binance tampoco viven en TR.</div>
 
+  <div class="eyebrow">El bote de la casa</div>
+  <div class="card" id="pCasa"></div>
+  <div class="note">La horquilla sale de tus peores y mejores meses recientes de ahorro en renta
+    fija. No es una promesa: se recalcula con cada mes que cobras.</div>
+
   <div class="eyebrow">Patrimonio invertido</div>
   <div class="card" id="pInv"></div>
   <div class="note">Solo lo que puede subir o bajar. Renta fija, liquidez y fondo de emergencia
@@ -460,6 +469,7 @@ const SEED = {
   v: 4,
   config: {
     pInv: 70, pFE: 40, pens: 125,
+    objetivoCasa: null,                 // lo declara el usuario; la app viaja sin él
     cats: [
       {id:'rf',  n:'Renta fija',     pct:65,   acumula:true,  sub:'ahorro finalista · no se invierte'},
       {id:'rv',  n:'Renta variable', pct:17.5, acumula:false, activos:['Core MSCI World','Nasdaq 100','Finizens']},
@@ -807,6 +817,61 @@ function rTarta(){
     Sin el fondo de emergencia, que no entra en el reparto.
     <em>Toca la tarta</em> para ${soloInv?'volver al reparto entero':'ver la cartera sin la renta fija'}.`;
 }
+/* ── El bote de la casa: objetivo declarado, progreso y fecha EN HORQUILLA ──
+   El objetivo lo tecleas tú (la app viaja sin él). El ritmo sale de lo que
+   entró a renta fija en tus últimos 6 meses con dato: serie histórica más los
+   meses cobrados en la app. Centro = la media; horquilla = media de tus 3
+   peores meses contra la de tus 3 mejores. Nunca una fecha exacta: un número
+   creíble y falso es peor que ninguno. */
+function entradasRf(){
+  const ent = new Map();                              // ym → euros que entraron
+  const s = D.series.rf;
+  if (s) D.meses.forEach((ym,i) => { if (i>0) ent.set(ym, s.saldo[i]-s.saldo[i-1]); });
+  Object.entries(S.meses).forEach(([ym,m]) => {
+    if (m.aplicado && m.aplicado.rf > 0.005) ent.set(ym, m.aplicado.rf);
+  });
+  return [...ent.entries()].sort((a,b)=>a[0]<b[0]?-1:1).slice(-6);
+}
+function rCasa(){
+  const obj = S.config.objetivoCasa ?? null;
+  const rf = S.cuentaTR.comp.rf;
+  const fEt = meses => { const d = new Date(HOY); d.setMonth(d.getMonth()+meses);
+    return MESC[String(d.getMonth()+1).padStart(2,'0')]+'-'+String(d.getFullYear()).slice(2); };
+  let h = `<div class="vm"><span class="nm">Objetivo<small>lo que quieres juntar para la entrada</small></span>
+    <input type="number" step="500" inputmode="numeric" placeholder="teclea" id="iObjCasa" value="${obj ?? ''}"></div>`;
+  if (!obj){
+    $('pCasa').innerHTML = h + `<div class="vacio">Declara el objetivo y te digo cómo vas y cuándo llegarías.</div>`;
+    return;
+  }
+  const pct = Math.max(Math.min(rf/obj*100, 100), 0), falta = obj-rf;
+  h += `<div class="casaBar"><b style="width:${pct.toFixed(2)}%"></b>
+      <i class="h" style="left:25%"></i><i class="h" style="left:50%"></i><i class="h" style="left:75%"></i></div>
+    <div class="fr"><span class="nm">Llevas<small>${pct.toFixed(1).replace('.',',')} % de ${eur0(obj)}</small></span>
+      <span class="n num">${eur0(rf)}</span></div>`;
+  if (falta <= 0.005){
+    h += `<div class="fr"><span class="nm"><b>Objetivo cumplido.</b><small>el bote ya cubre la entrada</small></span>
+      <span class="n up">✔</span></div>`;
+  } else {
+    const ent = entradasRf(), vals = ent.map(([,v])=>v);
+    if (!vals.length){
+      h += `<div class="fr"><span class="nm">Sin fecha estimada<small>aún no hay meses de ahorro medidos: cobra un mes y vuelve</small></span>
+        <span class="n na">—</span></div>`;
+    } else {
+      const orden = [...vals].sort((a,b)=>a-b), tercio = Math.max(1, Math.floor(orden.length/3));
+      const media = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+      const lento = media(orden.slice(0, tercio)), rapido = media(orden.slice(-tercio));
+      const mRap = rapido>0.005 ? Math.ceil(falta/rapido) : null;
+      const mLen = lento>0.005 ? Math.ceil(falta/lento) : null;
+      const f = m => m===null || m>240 ? null : fEt(m);
+      const fr = f(mRap), fl = f(mLen);
+      const rango = fr===null ? 'sin fecha a este ritmo' : fl===null ? `${fr} o más allá` : fr===fl ? fr : `${fr} – ${fl}`;
+      h += `<div class="fr"><span class="nm">Llegarías<small>faltan ${eur0(falta)} · tus últimos ${vals.length} meses
+          metieron de ${eur0(lento)} a ${eur0(rapido)} al mes (media ${eur0(media(vals))})</small></span>
+        <span class="n num">${rango}</span></div>`;
+    }
+  }
+  $('pCasa').innerHTML = h;
+}
 function rPat(){
   const P = patrimonio();
   $('pTotal').textContent = eur(P.total) + (P.parcial ? ' +' : '');
@@ -818,7 +883,7 @@ function rPat(){
      : viejo.d>30 ? `<span class="chip bad">Caducado</span>` : viejo.d>7 ? `<span class="chip warn">Envejecido</span>`
      : `<span class="chip ok">Al día</span>`)
     + `<span class="chip">lo más viejo: ${viejo.n}, hace ${viejo.d} días</span>`;
-  rTarta();
+  rTarta(); rCasa();
 
   const ramas = [
     {n:'Renta fija', liq:S.cuentaTR.comp.rf, nota:'entrada del piso · al 2 % en TR', hijos:[]},
@@ -1335,6 +1400,9 @@ document.addEventListener('input', e => {
   const map={iNomina:'nomina',iFijos:'fijos',iExtra:'extra',iIntTR:'intTR',iSobre:'sobre'};
   if (map[t.id]){ const v=parseFloat(t.value); mes()[map[t.id]] = isFinite(v)?v:null;
     aplicarMes();                       // el dinero entra en la cuenta de verdad
+    renderPronto(); return; }
+  if (t.id==='iObjCasa'){ const v=parseFloat(t.value);
+    S.config.objetivoCasa = isFinite(v)&&v>0 ? v : null;
     renderPronto(); }
 });
 document.addEventListener('click', e => {
