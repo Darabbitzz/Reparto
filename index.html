@@ -585,6 +585,9 @@ const dias = f => Math.round((new Date(HOY)-new Date(f))/864e5);
 const dec = v => parseFloat(String(v).trim().replace(',','.'));
 const enMeses = m => { const d = new Date(HOY); d.setMonth(d.getMonth()+m);
   return MESC[String(d.getMonth()+1).padStart(2,'0')]+'-'+String(d.getFullYear()).slice(2); };
+const ymAdd = (ym, n) => { let [y,m] = ym.split('-').map(Number); m += n;
+  while (m < 1){ m += 12; y--; } while (m > 12){ m -= 12; y++; }
+  return y+'-'+String(m).padStart(2,'0'); };
 const raya = '—';
 const MESN=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 let ymAct = HOY.slice(0,7);
@@ -1186,6 +1189,88 @@ function rTR(){
 /* ── bloques analíticos: invertido, origen, IPC, año a año ─────────────── */
 const IPC = {2023:3.41, 2024:2.94, 2025:2.92}, IPC_MEDIO = 3.09;
 
+/* ── cierres mensuales automáticos ──
+   La primera vez que la app se abre en un mes nuevo, guarda el cierre del mes
+   anterior por rama (unidades × precios del momento). Es la pieza que permite
+   el año-a-año y el IPC vivos y que Evolución crezca sola más allá del
+   histórico. Si se abre tarde, el cierre se toma tarde y guarda su fecha (f)
+   para no mentir. Los meses cubiertos por el histórico no se tocan. */
+const RAMAS_CIERRE = ['rf','rv','world','nasdaq','fin','cri','btc','eth','oro','pens','fe','liq','int','invertido'];
+function cerrarMeses(hoy){
+  hoy = hoy || HOY;
+  if (!S.cierres) S.cierres = {};
+  const ant = ymAdd(hoy.slice(0,7), -1);
+  const corteYm = ((S.hist && S.hist.corte) || '2026-08-05').slice(0,7);
+  if (ant < corteYm || S.cierres[ant]) return;
+  if (vivoDe('invertido') === null) return;          // sin precio de cripto: otro día
+  const c = { f: hoy };
+  RAMAS_CIERRE.forEach(id => { const v = vivoDe(id); if (v !== null) c[id] = +(+v).toFixed(2); });
+  S.cierres[ant] = c; save();
+}
+// el cierre de un mes: primero los guardados por la app, después el histórico
+function cierreDe(ym, id){
+  if (S.cierres && S.cierres[ym] && S.cierres[ym][id] !== undefined) return S.cierres[ym][id];
+  const largo = D.largo && D.largo[id], corta = D.series[id];
+  const ms = largo ? largo.meses : (corta ? D.meses : null);
+  const sa = largo ? largo.saldo : (corta ? corta.saldo : null);
+  if (!ms) return null;
+  const i = ms.indexOf(ym);
+  return i >= 0 ? sa[i] : null;
+}
+// lo aportado a una rama en los meses (ymDesde, ymHasta], para neutralizarlo
+function aportEntre(id, ymDesde, ymHasta){
+  let s = 0, ym = ymAdd(ymDesde, 1);
+  while (ym <= ymHasta){ s += apDe(id, ym); ym = ymAdd(ym, 1); }
+  return s;
+}
+/* ── año a año VIVO: la fila del año se estira hasta HOY ──
+   El histórico congelado llega al mes anterior al corte; desde ahí la app
+   encadena Dietz simple entre los puntos que tiene (cierres automáticos y el
+   valor de ahora), neutralizando aportaciones. Un hueco que cruce de año se
+   apunta entero al año en que termina (fila marcada en .cruza). */
+function anualVivo(){
+  const filas = ANUAL.map(a => ({...a}));
+  const vHoy = vivoDe('invertido');
+  if (vHoy === null) return filas;                    // sin precio: congelado tal cual
+  const hoyYm = HOY.slice(0,7);
+  const cierres = Object.keys(S.cierres||{}).filter(ym => S.cierres[ym].invertido !== undefined).sort();
+  let ancla = filas.length ? ymAdd(((S.hist && S.hist.corte) || '2026-08-05').slice(0,7), -1)
+                           : (cierres[0] || null);
+  if (ancla === null || ancla >= hoyYm) return filas;
+  const puntos = [ancla, ...cierres.filter(ym => ym > ancla && ym < hoyYm)];
+  const tramos = [];
+  for (let i=1; i<puntos.length; i++) tramos.push([puntos[i-1], puntos[i], cierreDe(puntos[i], 'invertido')]);
+  tramos.push([puntos[puntos.length-1], hoyYm, vHoy]);
+  const porAnio = {};
+  tramos.forEach(([d, h, V1]) => {
+    const V0 = cierreDe(d, 'invertido');
+    if (V0 === null || V1 === null) return;
+    const A = aportEntre('invertido', d, h), base = V0 + A/2;
+    if (base <= 0) return;
+    const y = h.slice(0,4);
+    const t = porAnio[y] = porAnio[y] || {f:1, eur:0, cruza:false};
+    t.f *= 1 + (V1 - V0 - A)/base;
+    t.eur += V1 - V0 - A;
+    if (ymAdd(d,1).slice(0,4) !== y) t.cruza = true;
+  });
+  Object.entries(porAnio).forEach(([y, t]) => {
+    let fila = filas.find(x => String(x.a) === y);
+    if (!fila){ fila = {a:y, r:0, eur:0, ipc:IPC[y] ?? null, det:[]}; filas.push(fila); }
+    fila.r = ((1 + fila.r/100) * t.f - 1) * 100;
+    fila.eur = (fila.eur || 0) + t.eur;
+    const intApp = Object.entries(S.meses).reduce((s,[ym,m]) =>
+      s + (ym.slice(0,4)===y && ym > ancla && m.intTR ? m.intTR : 0), 0);
+    if (intApp > 0.005){ const b = fila.int || {n:0, b:0, pts:0};
+      fila.int = { n: b.n + intApp, b: (b.b || b.n) + intApp,
+                   pts: b.pts + (S.cuentaTR.saldo > 0 ? intApp/S.cuentaTR.saldo*100 : 0) }; }
+    fila.viva = true;
+    fila.nota = (fila.ipc === null || fila.ipc === undefined ? 'IPC sin publicar' :
+      `IPC ${fila.ipc.toFixed(2).replace('.',',')} %`) + ` · a ${HOY.split('-').reverse().join('/')}${t.cruza ? ' · ≈' : ''}`;
+  });
+  filas.sort((a,b) => a.a - b.a);
+  return filas;
+}
+
 /* El histórico del import (ORIGEN) está congelado a su fecha de corte. Esta
    función lo trae al presente con lo que la app SÍ sabe que pasó después:
    las conversiones de S.mov (euros → unidades), el plan de pensiones de los
@@ -1268,18 +1353,37 @@ function rInv(){
 }
 function rIpc(){
   if(!ORIG_P.length){ $('pIpc').innerHTML=`<div class="fr"><span class="nm">Sin histórico</span><span class="n na">—</span></div>`; return; }
-  $('pIpc').innerHTML = ORIG_P.map(([n,k]) => { const o=ORIGEN[k];
-    const corto = o.meses < 12, dif = o.tir - IPC_MEDIO;
+  // la TIR se estira hasta HOY: al tramo congelado se le encadena el
+  // rendimiento desde el corte (Dietz simple con las aportaciones nuevas)
+  // y se re-anualiza. Aproximada, y la letra pequeña lo dice.
+  const corte = (S.hist && S.hist.corte) || '2026-08-05';
+  const mDesde = Math.max((new Date(HOY) - new Date(corte)) / (86400000*30.44), 0);
+  const OV = origenVivo(), fHoy = HOY.split('-').reverse().join('/');
+  $('pIpc').innerHTML = ORIG_P.map(([n,k]) => { const o=ORIGEN[k], ov=OV[k];
+    let tir = o.tir, meses = o.meses || 0, vivo = false;
+    if (ov && ov.val !== null && o.tir !== null && o.val > 0 && mDesde > 0.1){
+      const A = ov.ap - o.ap, base = o.val + A/2;
+      if (base > 0){
+        const rS = (ov.val - o.val - A)/base;
+        if (rS > -1){
+          const mTot = meses + mDesde;
+          tir = (Math.pow(Math.pow(1 + o.tir/100, meses/12) * (1 + rS), 12/mTot) - 1) * 100;
+          meses = mTot; vivo = true;
+        }
+      }
+    }
+    const corto = meses < 12, dif = tir - IPC_MEDIO;
     const v = corto ? {c:'x',t:'—'} : dif>1.5 ? {c:'b',t:'Bien'} : dif<-1.5 ? {c:'m',t:'Mal'} : {c:'i',t:'En la línea'};
     return `<div class="fr"><span class="nm">${n}<small>${corto
-        ? `solo ${o.meses} meses · muy poco para comparar`
-        : `${(dif>=0?'+':'')+dif.toFixed(1)} puntos sobre el IPC medio`}</small></span>
-      <span class="n num ${corto?'na':o.tir>=0?'up':'dn'}">${corto?'—':(o.tir>=0?'+':'')+o.tir.toFixed(1)+' %'}</span>
+        ? `solo ${Math.round(meses)} meses · muy poco para comparar`
+        : `${(dif>=0?'+':'')+dif.toFixed(1)} puntos sobre el IPC medio${vivo ? ` · a ${fHoy}, encadenada` : ''}`}</small></span>
+      <span class="n num ${corto?'na':tir>=0?'up':'dn'}">${corto?'—':(tir>=0?'+':'')+tir.toFixed(1)+' %'}</span>
       <span class="ver ${v.c}">${v.t}</span></div>`; }).join('');
 }
 function rAnual(){
-  if(!ANUAL.length){ $('pAnual').innerHTML=`<div class="fr"><span class="nm">Sin histórico<small>impórtalo desde Fotos → Respaldo</small></span><span class="n na">—</span></div>`; return; }
-  $('pAnual').innerHTML = ANUAL.map(a => {
+  const filas = anualVivo();
+  if(!filas.length){ $('pAnual').innerHTML=`<div class="fr"><span class="nm">Sin histórico<small>impórtalo desde Fotos → Respaldo, o deja que la app cierre su primer mes</small></span><span class="n na">—</span></div>`; return; }
+  $('pAnual').innerHTML = filas.map(a => {
     const rTot = a.r + (a.int ? a.int.pts : 0);
     const v = a.ipc===null ? {c:'x',t:'—'}
       : rTot-a.ipc>1.5 ? {c:'b',t:'Bien'} : rTot-a.ipc<-1.5 ? {c:'m',t:'Mal'} : {c:'i',t:'En la línea'};
@@ -1290,10 +1394,13 @@ function rAnual(){
           ? `<br>con intereses de TR: <b class="${rTot>=0?'sup':'sdn'}">${(rTot>=0?'+':'')+rTot.toFixed(1)} %</b>` : ''}</small></span>
       <span class="n num ${a.r>=0?'up':'dn'}">${(a.r>=0?'+':'')+a.r.toFixed(1)} %</span>
       <span class="ver ${v.c}">${v.t}</span></button>`
-      + (ab ? `<div class="det"><div class="dl cab"><span>sin la cripto</span>
+      + (ab ? `<div class="det">`
+        + (a.sin !== undefined && a.sin !== null ? `<div class="dl cab"><span>sin la cripto</span>
           <b class="${a.sin>=0?'sup':'sdn'}">${(a.sin>=0?'+':'')+a.sin.toFixed(1)} %</b>
-          <em>pesaba el ${a.peso} %</em></div>`
-        + a.det.map(d=>`<div class="dl"><span>${d.n}</span>
+          <em>pesaba el ${a.peso} %</em></div>` : '')
+        + (a.viva ? `<div class="dl"><span style="font-size:12px;color:var(--mute)">El tramo reciente lo calcula
+          la app con sus cierres y el valor de hoy; el desglose por activo llega hasta el corte del histórico.</span></div>` : '')
+        + (a.det||[]).map(d=>`<div class="dl"><span>${d.n}</span>
           <b class="${d.r>=0?'sup':'sdn'}">${(d.r>=0?'+':'')+d.r.toFixed(1)} %</b>
           <em class="num">${(d.e>=0?'+':'')+eur0(d.e)}</em></div>`).join('')
         + (a.int ? `<div class="dl int"><span>Intereses de Trade Republic
@@ -1366,6 +1473,13 @@ function conHoy(s, id){
   const ym = HOY.slice(0,7);
   if (s.meses[s.meses.length-1] > ym) return s;      // la serie ya va por delante
   const meses=[...s.meses], saldo=[...s.saldo], ap=[...(s.ap||[])], mk=[...(s.mk||[])];
+  // los cierres guardados estiran la serie por los meses que el histórico no cubre
+  Object.keys(S.cierres || {}).sort().forEach(cm => {
+    if (cm <= meses[meses.length-1] || cm >= ym) return;
+    const V = S.cierres[cm][id]; if (V === undefined) return;
+    const A = apDe(id, cm);
+    meses.push(cm); saldo.push(V); ap.push(A); mk.push(V - saldo[saldo.length-2] - A);
+  });
   let apPrevio = 0;
   if (meses[meses.length-1] === ym){ meses.pop(); saldo.pop(); apPrevio = ap.pop() || 0; mk.pop(); }
   const aport = apPrevio + apDe(id, ym);
@@ -1594,6 +1708,7 @@ function render(){
   const pos = a && a.selectionStart != null ? a.selectionStart : null;
   const txt = a && a.tagName === 'INPUT' ? a.value : null;
 
+  cerrarMeses();                          // si es la primera vez este mes, guarda el cierre
   rMes(); rPat(); rEvo(); rPro(); rFot(); save();
 
   if (id || marca){
