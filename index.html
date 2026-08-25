@@ -1228,8 +1228,10 @@ function aportEntre(id, ymDesde, ymHasta){
    encadena Dietz simple entre los puntos que tiene (cierres automáticos y el
    valor de ahora), neutralizando aportaciones. Un hueco que cruce de año se
    apunta entero al año en que termina (fila marcada en .cruza). */
+const DET_ID = {'Bitcoin':'btc','Ethereum':'eth','Core MSCI World':'world','Nasdaq 100':'nasdaq',
+                'Finizens':'fin','Plan de pensiones':'pens','Oro':'oro'};
 function anualVivo(){
-  const filas = ANUAL.map(a => ({...a}));
+  const filas = ANUAL.map(a => ({...a, det:(a.det||[]).map(d=>({...d}))}));
   const vHoy = vivoDe('invertido');
   if (vHoy === null) return filas;                    // sin precio: congelado tal cual
   const hoyYm = HOY.slice(0,7);
@@ -1238,26 +1240,58 @@ function anualVivo(){
                            : (cierres[0] || null);
   if (ancla === null || ancla >= hoyYm) return filas;
   const puntos = [ancla, ...cierres.filter(ym => ym > ancla && ym < hoyYm)];
-  const tramos = [];
-  for (let i=1; i<puntos.length; i++) tramos.push([puntos[i-1], puntos[i], cierreDe(puntos[i], 'invertido')]);
-  tramos.push([puntos[puntos.length-1], hoyYm, vHoy]);
-  const porAnio = {};
-  tramos.forEach(([d, h, V1]) => {
-    const V0 = cierreDe(d, 'invertido');
-    if (V0 === null || V1 === null) return;
-    const A = aportEntre('invertido', d, h), base = V0 + A/2;
-    if (base <= 0) return;
-    const y = h.slice(0,4);
-    const t = porAnio[y] = porAnio[y] || {f:1, eur:0, cruza:false};
-    t.f *= 1 + (V1 - V0 - A)/base;
-    t.eur += V1 - V0 - A;
-    if (ymAdd(d,1).slice(0,4) !== y) t.cruza = true;
-  });
-  Object.entries(porAnio).forEach(([y, t]) => {
+  // encadena Dietz por año para cualquier «valor» (una rama o un compuesto)
+  const cadena = (valDe, vFin, aportDe) => {
+    const tr = [];
+    for (let i=1; i<puntos.length; i++) tr.push([puntos[i-1], puntos[i], valDe(puntos[i])]);
+    tr.push([puntos[puntos.length-1], hoyYm, vFin]);
+    const por = {};
+    tr.forEach(([d, h, V1]) => {
+      const V0 = valDe(d);
+      if (V0 === null || V1 === null) return;
+      const A = aportDe(d, h), base = V0 + A/2;
+      if (base <= 0) return;
+      const y = h.slice(0,4);
+      const t = por[y] = por[y] || {f:1, eur:0, cruza:false};
+      t.f *= 1 + (V1 - V0 - A)/base;
+      t.eur += V1 - V0 - A;
+      if (ymAdd(d,1).slice(0,4) !== y) t.cruza = true;
+    });
+    return por;
+  };
+  const porId = id => cadena(ym => cierreDe(ym, id), vivoDe(id), (d,h) => aportEntre(id, d, h));
+  const inv = porId('invertido');
+  const cHoy = vivoDe('cri');
+  const sinC = cadena(
+    ym => { const a = cierreDe(ym,'invertido'), c = cierreDe(ym,'cri');
+            return a === null || c === null ? null : a - c; },
+    cHoy === null ? null : vHoy - cHoy,
+    (d,h) => aportEntre('invertido', d, h) - aportEntre('cri', d, h));
+  const detPor = {};
+  Object.entries(DET_ID).forEach(([n, id]) => detPor[n] = porId(id));
+  Object.entries(inv).forEach(([y, t]) => {
     let fila = filas.find(x => String(x.a) === y);
     if (!fila){ fila = {a:y, r:0, eur:0, ipc:IPC[y] ?? null, det:[]}; filas.push(fila); }
     fila.r = ((1 + fila.r/100) * t.f - 1) * 100;
     fila.eur = (fila.eur || 0) + t.eur;
+    // el desglose por activo también se encadena, parte a parte
+    Object.keys(DET_ID).forEach(n => {
+      const tp = detPor[n][y];
+      if (!tp) return;
+      let d = fila.det.find(x => x.n === n);
+      if (!d){ if (Math.abs(tp.eur) < 0.5 && Math.abs(tp.f-1) < 1e-6) return;
+               d = {n, r:0, e:0}; fila.det.push(d); }
+      d.r = ((1 + d.r/100) * tp.f - 1) * 100;
+      d.e = (d.e || 0) + tp.eur;
+    });
+    fila.det.sort((x,z) => z.r - x.r);
+    // «sin la cripto» y el peso, vivos
+    const ts = sinC[y];
+    if (ts && fila.sin !== undefined && fila.sin !== null)
+      fila.sin = ((1 + fila.sin/100) * ts.f - 1) * 100;
+    else if (ts && (fila.sin === undefined || fila.sin === null))
+      fila.sin = (ts.f - 1) * 100;
+    if (cHoy !== null && vHoy > 0) fila.peso = Math.round(cHoy/vHoy*100);
     const intApp = Object.entries(S.meses).reduce((s,[ym,m]) =>
       s + (ym.slice(0,4)===y && ym > ancla && m.intTR ? m.intTR : 0), 0);
     if (intApp > 0.005){ const b = fila.int || {n:0, b:0, pts:0};
@@ -1397,9 +1431,7 @@ function rAnual(){
       + (ab ? `<div class="det">`
         + (a.sin !== undefined && a.sin !== null ? `<div class="dl cab"><span>sin la cripto</span>
           <b class="${a.sin>=0?'sup':'sdn'}">${(a.sin>=0?'+':'')+a.sin.toFixed(1)} %</b>
-          <em>pesaba el ${a.peso} %</em></div>` : '')
-        + (a.viva ? `<div class="dl"><span style="font-size:12px;color:var(--mute)">El tramo reciente lo calcula
-          la app con sus cierres y el valor de hoy; el desglose por activo llega hasta el corte del histórico.</span></div>` : '')
+          <em>${a.viva?'pesa hoy':'pesaba'} el ${a.peso} %</em></div>` : '')
         + (a.det||[]).map(d=>`<div class="dl"><span>${d.n}</span>
           <b class="${d.r>=0?'sup':'sdn'}">${(d.r>=0?'+':'')+d.r.toFixed(1)} %</b>
           <em class="num">${(d.e>=0?'+':'')+eur0(d.e)}</em></div>`).join('')
