@@ -627,7 +627,7 @@ function poolRiesgo(inv, modo){
 // asignación del mes por categoría (euros), desde el reparto.
 // Dos modos POR MES (m.modo): 'pct' = porcentajes fijos de siempre;
 // 'auto' = renta fija, yolo y plan conservan lo suyo y el resto de la bolsa
-// se reparte por hueco contra el objetivo 48/33/14/5 (mismo algoritmo que la
+// se reparte por hueco contra el reparto sin renta fija (mismo algoritmo que la
 // tarjeta «¿A dónde va lo siguiente?»). Decidido el 08/08/2026.
 function asigMes(c){
   const m = mes();
@@ -709,7 +709,7 @@ function rMes(){
     `<button data-modo="pct" class="${modo==='pct'?'on':''}" ${bloqueado?'disabled':''}>% fijos</button>
      <button data-modo="auto" class="${modo==='auto'?'on':''}" ${bloqueado?'disabled':''}>Autobalance</button>`
     + (bloqueado ? `<span class="fij">Ya has aportado este mes: el modo queda fijado.</span>`
-       : modo==='auto' ? `<span class="fij">Renta fija, plan y yolo conservan lo suyo; el resto va a lo más lejos del objetivo 48·33·14·5.</span>` : '');
+       : modo==='auto' ? `<span class="fij">Renta fija, plan y yolo conservan lo suyo; el resto va a lo más lejos del reparto sin renta fija.</span>` : '');
   let suma = 0;
   $('mCats').innerHTML = S.config.cats.map(c => { suma += c.pct;
     const e = asigMes(c);
@@ -979,16 +979,18 @@ function rRacha(){
 }
 
 /* ════════════ RENDER · PATRIMONIO ════════════ */
-// La tarta tiene dos vistas. «Todo»: el reparto de la nómina tal cual (los %
-// de config). «Sin renta fija»: la cartera de riesgo con su PROPIO objetivo
-// (alt), decidido el 07/08/2026 — no es el reparto renormalizado. El plan de
-// pensiones cuenta como renta variable en las dos (decisión del 07/08/2026).
+// La tarta tiene dos vistas y UN solo objetivo: el reparto de la nómina.
+// «Todo» lo compara tal cual; «Sin renta fija» compara la cartera de riesgo
+// contra ese mismo reparto reescalado sin la renta fija (pctRiesgo). Hubo un
+// objetivo propio 48/33/14/5 (07/08/2026) y se retiró el 26/08/2026: dos
+// objetivos que no eran la misma cifra daban veredictos contradictorios.
+// El plan de pensiones cuenta como renta variable en las dos vistas.
 const OBJ = [
   {id:'rf', n:'Renta fija', c:'var(--ink)'},
-  {id:'rv', n:'Renta variable', c:'var(--primary)', alt:48},
-  {id:'cri',n:'Cripto', c:'#5e5e5e', alt:33},
-  {id:'liqY',n:'Líquido', c:'#cccccc', alt:14},           // liquidez + yolo
-  {id:'oro',n:'Oro', c:'#a7a7a7', alt:5},
+  {id:'rv', n:'Renta variable', c:'var(--primary)', riesgo:true},
+  {id:'cri',n:'Cripto', c:'#5e5e5e', riesgo:true},
+  {id:'liqY',n:'Líquido', c:'#cccccc', riesgo:true},      // liquidez + yolo
+  {id:'oro',n:'Oro', c:'#a7a7a7', riesgo:true},
 ];
 let soloInv = false, pAbierto = {};
 function euCat(id){                                        // euros reales por categoría objetivo
@@ -1007,23 +1009,29 @@ function pctObj(id){
   if (id==='liqY') return c.find(x=>x.id==='liq').pct + c.find(x=>x.id==='yolo').pct;
   return c.find(x=>x.id===id).pct;
 }
+// el objetivo de la cartera de riesgo: el MISMO reparto, sin renta fija y
+// reescalado a 100. Si tocas los porcentajes del reparto, esto se mueve solo.
+function pctRiesgo(id){
+  const total = OBJ.filter(o=>o.riesgo).reduce((s,o)=>s+pctObj(o.id),0);
+  return total > 0 ? pctObj(id)/total*100 : 0;
+}
 // reparte X entre las categorías de riesgo, proporcional al hueco de cada una
 // contra su objetivo (OBJ.alt). rvForzado = dinero que YA va a renta variable
 // sí o sí (el plan de pensiones) y cuenta como asignado antes de repartir.
 // La usan la tarjeta de Patrimonio y el modo autobalance de Mes.
 function repartirHueco(X, rvForzado){
-  const ks = OBJ.filter(o => o.alt !== undefined);
+  const ks = OBJ.filter(o => o.riesgo);
   const v = {}; ks.forEach(o => v[o.id] = euCat(o.id));
   v.rv += rvForzado || 0;
   const T = ks.reduce((s,o)=>s+v[o.id],0) + X;   // v.rv ya lleva dentro lo forzado
   let D = 0; const d = {};
-  ks.forEach(o => { d[o.id] = Math.max(o.alt/100*T - v[o.id], 0); D += d[o.id]; });
+  ks.forEach(o => { d[o.id] = Math.max(pctRiesgo(o.id)/100*T - v[o.id], 0); D += d[o.id]; });
   const r = {}; ks.forEach(o => r[o.id] = D>0 ? X*d[o.id]/D : 0);
   return r;                                   // {rv, cri, liqY, oro}
 }
 function rTarta(){
-  const it = OBJ.map(o => ({...o, p:soloInv?(o.alt||0):pctObj(o.id), e:euCat(o.id),
-                            on:!soloInv || o.alt !== undefined}));
+  const it = OBJ.map(o => ({...o, p:soloInv?(o.riesgo?pctRiesgo(o.id):0):pctObj(o.id), e:euCat(o.id),
+                            on:!soloInv || !!o.riesgo}));
   const tp = it.reduce((s,o)=>s+(o.on?o.p:0),0), te = it.reduce((s,o)=>s+(o.on?o.e:0),0);
   const rea = o => o.on&&te>0 ? o.e/te*100 : 0, pct = o => o.on ? o.p/tp*100 : 0;
   // barra apilada horizontal: rectángulos con corte recto, sin arcos que se rompan
@@ -1039,7 +1047,8 @@ function rTarta(){
         <b>${pc(rea(o))}</b><b class="obj">${pc(pct(o))}</b>
         <b class="${Math.abs(d)<2?'neu':d>0?'sob':'baj'}">${(d>=0?'+':'')+d.toFixed(1).replace('.',',')}</b></div>`; }).join('');
   $('pieAviso').innerHTML = `${soloInv
-      ? 'La cartera de riesgo con su propio objetivo: 48 · 33 · 14 · 5.'
+      ? `El mismo reparto, sin la renta fija y reescalado: ${OBJ.filter(o=>o.riesgo)
+          .map(o=>pctRiesgo(o.id).toFixed(1).replace('.',',')).join(' · ')}.`
       : 'El reparto de la nómina.'} El plan de pensiones cuenta como renta variable.
     Sin el fondo de emergencia, que no entra en el reparto.
     <em>Toca la tarta</em> para ${soloInv?'volver al reparto entero':'ver la cartera sin la renta fija'}.`;
