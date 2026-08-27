@@ -563,6 +563,17 @@ function migrar(s){
   (s.mov||[]).forEach(v => { if (v.traspaso && v.dest && v.u===0){
     v.cat=v.dest; v.origen='liq'; v.u=null;
     delete v.traspaso; delete v.dest; delete v.activo; } });
+  // las acciones yolo del flujo viejo morían como euros planos: pasan a valor
+  // a mano con su nombre (misma mudanza que hace ahora el convertir)
+  (s.mov||[]).forEach(v => {
+    if (v.cat==='yolo' && v.u!==null && v.activo && !v.manoKey && !v.traspaso
+        && (s.planos.yolo||0) >= v.eur - 0.005){
+      const key = 'y_' + v.activo.toLowerCase().replace(/[^a-z0-9]+/g,'');
+      s.planos.yolo -= v.eur;
+      const mm = s.mano[key] = s.mano[key] || {n:v.activo, eur:0, fecha:v.f, yolo:true, u:0};
+      mm.eur += v.eur; mm.u = (mm.u||0)+(v.u||0);
+      v.manoKey = key;
+    } });
   return s;
 }
 let S;
@@ -1001,8 +1012,13 @@ function euCat(id){                                        // euros reales por c
   if (id==='rv')  return pos('rv') + S.mano.fin.eur + S.mano.pens.eur + S.cuentaTR.comp.rv + S.planos.rv;
   if (id==='cri') return pos('cri') + S.cuentaTR.comp.cri + S.planos.cri;
   if (id==='oro') return pos('oro') + S.cuentaTR.comp.oro + S.planos.oro;
-  if (id==='liqY')return S.cuentaTR.comp.liq + S.cuentaTR.comp.yolo + S.planos.liq + S.planos.yolo;
+  if (id==='liqY')return S.cuentaTR.comp.liq + S.cuentaTR.comp.yolo + S.planos.liq + S.planos.yolo
+                       + manoYolo();
   return 0;
+}
+// las acciones yolo declaradas a mano (GitLab y compañía)
+function manoYolo(){
+  return Object.values(S.mano).reduce((s,m) => s + (m.yolo ? m.eur : 0), 0);
 }
 function pctObj(id){
   const c = S.config.cats;
@@ -1129,10 +1145,13 @@ function rPat(){
     {n:'Fondo de emergencia', liq:S.cuentaTR.comp.fe, nota:'⚠ 5 retiradas en los 6 meses hasta jul-26', hijos:[]},
     {n:'Oro', liq:S.cuentaTR.comp.oro, pl:S.planos.oro, hijos:[{k:'pos', p:'oroU'}]},
     {n:'Liquidez', liq:S.cuentaTR.comp.liq, pl:S.planos.liq, hijos:[]},
-    {n:'Yolo', liq:S.cuentaTR.comp.yolo, pl:S.planos.yolo, hijos:[]},
+    {n:'Yolo', liq:S.cuentaTR.comp.yolo, pl:S.planos.yolo,
+     hijos:Object.keys(S.mano).filter(k=>S.mano[k].yolo).map(k=>({k:'mano', m:k}))},
   ];
   const vHijo = h => {
-    if (h.k==='mano') return {v:S.mano[h.m].eur, n:S.mano[h.m].n, det:`valor a mano · hace ${dias(S.mano[h.m].fecha)} días`, man:true};
+    if (h.k==='mano'){ const mm = S.mano[h.m];
+      return {v:mm.eur, n:mm.n, man:true,
+        det:`${mm.u > 0 ? uds(mm.u)+' uds · ' : ''}valor a mano · hace ${dias(mm.fecha)} días`}; }
     if (h.p==='eth2'){ const pe=precioDe('eth'), ps=precioDe('steth');
       const v = pe===null||ps===null ? null : S.pos.eth.u*pe + S.pos.steth.u*ps;
       return {v, n:'Ethereum', det:`${uds(S.pos.eth.u)} ETH + ${uds(S.pos.steth.u)} stETH${v===null?' · sin precio':' × precio en vivo'}`}; }
@@ -1470,7 +1489,7 @@ function vivoDe(id){
   switch(id){
     case 'rf':   return S.cuentaTR.comp.rf;
     case 'fe':   return S.cuentaTR.comp.fe;
-    case 'liq':  return S.cuentaTR.comp.liq + S.cuentaTR.comp.yolo + S.cuentaTR.comp.oro;
+    case 'liq':  return S.cuentaTR.comp.liq + S.cuentaTR.comp.yolo + S.cuentaTR.comp.oro + manoYolo();
     case 'fin':  return S.mano.fin.eur;
     case 'pens': return S.mano.pens.eur;
     case 'world':return p('world');
@@ -1845,7 +1864,14 @@ document.addEventListener('click', e => {
       }
       v.activo=a; v.u=0; v.traspaso=true; v.dest=null; // «Fuera de cartera»: sale y punto
     } else if (c.libre){ if(!a) return; v.activo=a; v.u=(isFinite(u)&&u>0)?u:0;
-      // yolo con unidades no cotiza: se queda en planos contado en euros
+      // la acción yolo nace como VALOR A MANO (decidido el 27/08/2026): sale
+      // de los euros planos y aparece en Patrimonio con su nombre; el valor
+      // se edita en Fotos, como Finizens. Arranca valiendo lo que costó.
+      const key = 'y_' + a.toLowerCase().replace(/[^a-z0-9]+/g,'');
+      S.planos[v.cat] -= v.eur;
+      const mm = S.mano[key] = S.mano[key] || {n:a, eur:0, fecha:HOY, yolo:true, u:0};
+      mm.eur += v.eur; mm.u = (mm.u||0)+(v.u||0); mm.fecha = HOY;
+      v.manoKey = key;
     } else { if(!(isFinite(u)&&u>0)) return;
       v.activo=a; v.u=u; v.px=v.eur/u;      // lo que pagaste por unidad: se guarda para poder comparar
       // CONVERSIÓN: los euros planos dejan de existir, nacen unidades
@@ -1867,6 +1893,18 @@ document.addEventListener('click', e => {
         if (clave) S.pos[clave].u -= v.u;
         else if (v.activo==='Finizens') S.mano.fin.eur -= v.eur;
         S.planos[v.cat] += v.eur;                     // vuelven los planos antes de anularlos
+      }
+      // deshacer una acción yolo: sale del valor a mano y vuelve a planos.
+      // Si era el único movimiento de esa acción, la entrada se va ENTERA
+      // (aunque le hubieras declarado un valor mayor: era la valoración de
+      // algo que ya no existe, dejarla sería un fantasma de 30 €).
+      if (v.u!==null && c.libre && v.manoKey){
+        const mm = S.mano[v.manoKey];
+        if (mm){
+          mm.eur = Math.max(mm.eur - v.eur, 0); mm.u = Math.max((mm.u||0)-(v.u||0), 0);
+          if (!S.mov.some(x => x !== v && x.manoKey === v.manoKey)) delete S.mano[v.manoKey];
+        }
+        S.planos[v.cat] += v.eur;
       }
       if (v.traspaso){ if(v.dest) S.planos[v.dest] -= v.eur; S.planos.liq += v.eur; }
       S.planos[v.cat] -= v.eur;
