@@ -1,46 +1,46 @@
 {
   "schema": 1,
-  "generado": "2026-08-29T11:36:51Z",
-  "cierreDe": "2026-08-27",
+  "generado": "2026-08-31T11:32:56Z",
+  "cierreDe": "2026-08-31",
   "monedaBase": "EUR",
   "fx": {
-    "USD": 0.863,
-    "GBP": 1.1679,
-    "fecha": "2026-08-28"
+    "USD": 0.8618,
+    "GBP": 1.1669,
+    "fecha": "2026-08-31"
   },
   "precios": {
     "IE00B4L5Y983": {
       "simbolo": "SWDA.MI",
       "nombre": "iShares Core MSCI World UCITS ETF",
-      "precio": 127.15,
+      "precio": 127.45,
       "moneda": "EUR",
-      "fecha": "2026-08-27",
+      "fecha": "2026-08-31",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 126.68,
-      "variacionPct": 0.37
+      "cierreAnterior": 128.21,
+      "variacionPct": -0.59
     },
     "IE00B53SZB19": {
       "simbolo": "SXRV.DE",
       "nombre": "iShares NASDAQ 100 UCITS ETF (Acc)",
-      "precio": 1455.2,
+      "precio": 1455.8,
       "moneda": "EUR",
-      "fecha": "2026-08-27",
+      "fecha": "2026-08-31",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 1438.2,
-      "variacionPct": 1.18
+      "cierreAnterior": 1470.6,
+      "variacionPct": -1.01
     },
     "IE00B4ND3602": {
       "simbolo": "PPFB.DE",
       "nombre": "iShares Physical Gold ETC",
-      "precio": 76.55,
+      "precio": 74.49,
       "moneda": "EUR",
-      "fecha": "2026-08-27",
+      "fecha": "2026-08-31",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 76.53,
-      "variacionPct": 0.03
+      "cierreAnterior": 76.2,
+      "variacionPct": -2.24
     }
   },
   "historico": {
