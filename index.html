@@ -808,8 +808,11 @@ function rMes(){
   $('mHecho').innerHTML = hechos.length ? '<div class="card">'+hechos.map(v => {
     if (v.tipo === 'venta'){                      // una venta: lo que te dieron frente a lo que pagaste
       const res = v.eur - (v.coste || 0);
-      return `<div class="row"><span class="nm">Vendido ${v.activo}<small>${eur(v.eur)} · ${v.f} · pagaste ${eur(v.coste||0)} →
-          <b style="color:${res>=0?'var(--primary-dark)':'var(--error)'}">${res>=0?'+':''}${eur(res)}</b> · a liquidez</small></span>
+      // lo pagado se puede corregir aquí: las acciones del flujo viejo no traían
+      // coste y la app tomó el último valor declarado (salía «+0 €»)
+      return `<div class="row"><span class="nm">Vendido ${v.activo}<small>${eur(v.eur)} · ${v.f} · a liquidez · pagaste
+          <input type="text" inputmode="decimal" value="${v.coste ?? ''}" data-vcoste="${v.id}" style="width:74px;height:30px;padding:4px 6px;border:1px solid var(--hairline);border-radius:var(--r);font:700 13px/1 inherit;text-align:right"> €
+          → <b style="color:${res>=0?'var(--primary-dark)':'var(--error)'}">${res>=0?'+':''}${eur(res)}</b></small></span>
         <span class="eu num">${v.u?uds(v.u):raya}</span>
         <button class="x est" data-del="${v.id}">✕</button></div>`;
     }
@@ -1802,7 +1805,7 @@ function render(){
   // tenía el foco y dónde estaba el cursor, y se devuelve después.
   const a = document.activeElement;
   const id = a && a.tagName === 'INPUT' ? a.id : null;
-  const marca = a && a.tagName === 'INPUT' ? (a.dataset.pct||a.dataset.mano||'') : '';
+  const marca = a && a.tagName === 'INPUT' ? (a.dataset.pct||a.dataset.mano||a.dataset.vcoste||'') : '';
   const pos = a && a.selectionStart != null ? a.selectionStart : null;
   const txt = a && a.tagName === 'INPUT' ? a.value : null;
 
@@ -1811,7 +1814,7 @@ function render(){
 
   if (id || marca){
     const n = id ? $(id)
-      : document.querySelector(`[data-pct="${marca}"],[data-mano="${marca}"]`);
+      : document.querySelector(`[data-pct="${marca}"],[data-mano="${marca}"],[data-vcoste="${marca}"]`);
     if (n && n !== document.activeElement){
       // se devuelve el texto TAL CUAL se estaba tecleando: si el usuario va por
       // «8,» no se le convierte en «8» a media palabra
@@ -1836,6 +1839,8 @@ document.addEventListener('input', e => {
     if(c){ c.pct=dec(t.value)||0; renderPronto(); } return; }
   if (t.dataset.mano){ const v=dec(t.value);
     if(isFinite(v)&&v>=0){ S.mano[t.dataset.mano].eur=v; renderPronto(); } return; }
+  if (t.dataset.vcoste){ const v=S.mov.find(x=>x.id==t.dataset.vcoste), n=dec(t.value);
+    if(v && isFinite(n) && n>=0){ v.coste=n; renderPronto(); } return; }
   const map={iNomina:'nomina',iFijos:'fijos',iExtra:'extra',iIntTR:'intTR',iSobre:'sobre'};
   if (map[t.id]){ const v=dec(t.value); mes()[map[t.id]] = isFinite(v)?v:null;
     aplicarMes();                       // el dinero entra en la cuenta de verdad
