@@ -847,7 +847,16 @@ const PRO_RAMAS = [
 ];
 const PRO_TODO = ['rf','rv','fin','cri','oro','pens'];
 let prSel = 'todo', prN = 5, prAport = null;   // prAport = el «¿y si aporto X?» tecleado
-$('prQue').innerHTML = PRO_RAMAS.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
+// las acciones sueltas de renta variable también se proyectan (solo aportaciones:
+// no tienen TIR) y cuentan en «Todo» y en «Patrimonio invertido»
+function prRamas(){
+  const out = [];
+  PRO_RAMAS.forEach(r => { out.push(r);
+    if (r.id==='fin') manoIds(m=>m.rv).forEach(id => out.push({id, n:'      · '+S.mano[id.slice(2)].n}));
+  });
+  return out;
+}
+const proTodo = () => PRO_TODO.concat(manoIds(m=>m.rv));
 function entradasDe(id){
   if (id === 'rf') return entradasRf();
   const ent = new Map();
@@ -865,6 +874,9 @@ function ramaProy(id){
              aport: e.length ? e.reduce((s,[,v])=>s+v,0)/e.length : 0 };
   }
   const o = origenVivo()[id] || {};
+  // una acción suelta es una compra puntual: proyectarla como aportación
+  // mensual (500 €/mes por haber comprado 500 una vez) sería inventar
+  if (esMano(id)) return { v0: o.val ?? null, tir: null, aport: 0 };
   const e = entradasDe(id);
   const fiable = o.tir !== null && o.tir !== undefined && (o.meses||0) >= 12;
   return { v0: o.val ?? null, tir: fiable ? o.tir : null,
@@ -879,12 +891,13 @@ function bandaProy(v0, aport, tir, meses){
   return { bajo: a.map((v,i)=>Math.min(v, b[i])), alto: a.map((v,i)=>Math.max(v, b[i])) };
 }
 function rPro(){
-  const r = PRO_RAMAS.find(x=>x.id===prSel), meses = prN*12;
+  prSel = rellenarSelect($('prQue'), prRamas(), prSel);
+  const r = prRamas().find(x=>x.id===prSel), meses = prN*12;
   $('prTit').textContent = r.n.trim() + ' · en ' + prN + ' años';
-  const ramas = prSel==='todo' ? PRO_TODO
-    : prSel==='invertido' ? PRO_TODO.filter(x=>x!=='rf') : [prSel];
+  const ramas = prSel==='todo' ? proTodo()
+    : prSel==='invertido' ? proTodo().filter(x=>x!=='rf') : [prSel];
   const partes = ramas.map(id => ({id, ...ramaProy(id)}));
-  const sinPrecio = partes.filter(p => p.v0 === null).map(p => PRO_RAMAS.find(x=>x.id===p.id).n.trim());
+  const sinPrecio = partes.filter(p => p.v0 === null).map(p => prRamas().find(x=>x.id===p.id).n.trim());
   const usables = partes.filter(p => p.v0 !== null);
   const hayDato = usables.some(p => p.v0 > 0.005 || p.aport > 0.005);
   if (!hayDato){
@@ -955,7 +968,7 @@ function rPro(){
   const conDesg = prSel === 'todo' || prSel === 'invertido';
   $('prDesgTit').hidden = !conDesg;
   $('prDesg').innerHTML = !conDesg ? '' : partes.map(p => {
-    const n = PRO_RAMAS.find(x=>x.id===p.id).n.trim();
+    const n = prRamas().find(x=>x.id===p.id).n.trim();
     if (p.v0 === null) return `<div class="fr"><span class="nm">${n}<small>sin precio ahora mismo</small></span><span class="n na">—</span></div>`;
     const b = bandaProy(p.v0, p.aport, p.tir, meses);
     return `<div class="fr"><span class="nm">${n}<small>hoy ${eur0(p.v0)} · +${eur0(p.aport)}/mes · ${
@@ -1226,12 +1239,13 @@ function rTR(){
     filas.push({n:'Sin asignar', s:'saldo real menos bolsillos', v:P.sinAsignar});
   let posTR = 0;
   ['world','nasdaq','oroU'].forEach(k => { posTR += S.pos[k].u * (precioDe(k) ?? 0); });
+  posTR += manoRv() + manoYolo();                 // las acciones sueltas también viven en TR
   $('pTR').innerHTML = filas.map(f =>
     `<div class="fr"><span class="nm">${f.n}${f.s?`<small>${f.s}</small>`:''}</span>
        <span class="n num">${eur(f.v)}</span></div>`).join('')
     + `<div class="fr tot"><span class="nm">Efectivo<small>el saldo de la cuenta remunerada, al 2 %</small></span>
        <span class="n num">${eur(S.cuentaTR.saldo)}</span></div>`
-    + `<div class="fr"><span class="nm">Posiciones que cotizan en TR<small>World, Nasdaq y el oro, a precio de mercado</small></span>
+    + `<div class="fr"><span class="nm">Posiciones en TR<small>World, Nasdaq y oro a precio de mercado · acciones sueltas a mano</small></span>
        <span class="n num">${eur(posTR)}</span></div>`
     + `<div class="fr tot"><span class="nm">Todo lo que hay en TR</span>
        <span class="n num">${eur(S.cuentaTR.saldo + posTR)}</span></div>`;
@@ -1255,7 +1269,8 @@ function cerrarMeses(hoy){
   if (ant < corteYm || S.cierres[ant]) return;
   if (vivoDe('invertido') === null) return;          // sin precio de cripto: otro día
   const c = { f: hoy };
-  RAMAS_CIERRE.forEach(id => { const v = vivoDe(id); if (v !== null) c[id] = +(+v).toFixed(2); });
+  RAMAS_CIERRE.concat(manoIds(m => m.rv || m.yolo)).forEach(id => {
+    const v = vivoDe(id); if (v !== null) c[id] = +(+v).toFixed(2); });
   S.cierres[ant] = c; save();
 }
 // el cierre de un mes: primero los guardados por la app, después el histórico
@@ -1369,13 +1384,12 @@ function origenVivo(){
   const CLAVE = {'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'};
   S.mov.forEach(v => {
     if (v.f <= corte || v.u === null || v.traspaso) return;  // pendientes y traspasos: aún no son inversión
-    if (v.tipo === 'venta'){ if (v.rama === 'rv') nuevos.rv -= v.eur; return; }  // vender = aportación negativa
+    if (v.manoKey || v.tipo === 'venta') return;              // las acciones a mano van en su propia rama
     const k = CLAVE[v.activo];
     if (v.activo==='Finizens') nuevos.fin += v.eur;
     else if (k==='world'||k==='nasdaq'){ nuevos.rv += v.eur; nuevos[k] += v.eur; }
     else if (k==='btc'||k==='eth'){ nuevos.cri += v.eur; nuevos[k] += v.eur; }
     else if (k==='oroU') nuevos.oro += v.eur;
-    else if (v.rama === 'rv') nuevos.rv += v.eur;             // acción a mano dentro de renta variable
   });
   Object.entries(S.meses).forEach(([ym,m]) => {              // el plan se aporta al cobrar
     if (ym >= corte.slice(0,7) && m.aplicado && m.aplicado.pens) nuevos.pens += m.aplicado.pens;
@@ -1383,15 +1397,24 @@ function origenVivo(){
   const vpos = ks => { let s=0;
     for (const k of ks){ const p=precioDe(k); if (p===null) return null; s += S.pos[k].u*p; }
     return s; };
-  const rvPos = vpos(['world','nasdaq']);
-  const val = { world:vpos(['world']), nasdaq:vpos(['nasdaq']), rv:rvPos===null?null:rvPos+manoRv(),
+  const val = { world:vpos(['world']), nasdaq:vpos(['nasdaq']), rv:vpos(['world','nasdaq']),
     btc:vpos(['btc']), eth:vpos(['eth','steth']), cri:vpos(['btc','eth','steth']),
     oro:vpos(['oroU']), fin:S.mano.fin.eur, pens:S.mano.pens.eur };
   const O = {};
   Object.keys(val).forEach(k => { const b = ORIGEN[k] || {};
     O[k] = { ap:(b.ap||0)+(nuevos[k]||0), val:val[k],
              tir:b.tir ?? null, desde:b.desde ?? null, meses:b.meses ?? null }; });
-  const cima = ['rv','fin','cri','pens','oro'], bi = ORIGEN.invertido || {};
+  // cada acción a mano es una rama: lo pagado (compras menos ventas) frente a
+  // lo que vale hoy, desde el mes en que la app la conoció
+  Object.entries(S.mano).forEach(([k, mm]) => {
+    if (!(mm.rv || mm.yolo)) return;
+    const movs = S.mov.filter(v => v.manoKey === k && v.u !== null);
+    const primero = movs.map(v => v.f).sort()[0] || mm.fecha;
+    const meses = Math.max(Math.floor((new Date(HOY) - new Date(primero)) / (86400000*30.44)), 0);
+    O['m:'+k] = { ap: mm.coste ?? mm.eur, val: mm.eur, tir: null, meses,
+      desde: MESC[primero.slice(5,7)] + '-' + primero.slice(0,4) };
+  });
+  const cima = ['rv','fin','cri','pens','oro', ...manoIds(m => m.rv)], bi = ORIGEN.invertido || {};
   O.invertido = { ap:cima.reduce((s,k)=>s+O[k].ap,0),
     val:cima.some(k=>O[k].val===null) ? null : cima.reduce((s,k)=>s+O[k].val,0),
     tir:bi.tir ?? null, desde:bi.desde ?? null, meses:bi.meses ?? null };
@@ -1403,6 +1426,7 @@ function rInv(){
   const O = origenVivo();
   const pares = (ORIG_P.length ? ORIG_P
     : [['Renta variable en TR','rv'],['Finizens','fin'],['Cripto','cri'],['Plan de pensiones','pens'],['Oro','oro']])
+    .concat(manoIds(m => m.rv).map(id => [S.mano[id.slice(2)].n, id]))   // las acciones sueltas, cada una
     .filter(([,k]) => O[k] && (O[k].ap > 0.005 || (O[k].val ?? 0) > 0.005));
   if (!pares.length){                        // ni histórico ni movimiento: los bloques callan
     $('pInv').innerHTML = `<div class="fr"><span class="nm">Sin datos de aportaciones<small>impórtalos desde Fotos → Respaldo, o apunta la primera en Mes</small></span><span class="n na">—</span></div>`;
@@ -1509,7 +1533,11 @@ const CLAVE_ACT = {'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'bt
 const RAMAS_DE = {world:['world','rv','invertido'], nasdaq:['nasdaq','rv','invertido'],
                   btc:['btc','cri','invertido'], eth:['eth','cri','invertido'],
                   oroU:['oro','invertido'], fin:['fin','invertido'], pens:['pens','invertido']};
+// las acciones a mano son ramas propias: id «m:<clave de S.mano>»
+const esMano = id => typeof id === 'string' && id.startsWith('m:');
+const manoIds = filtro => Object.keys(S.mano).filter(k => filtro(S.mano[k])).map(k => 'm:'+k);
 function vivoDe(id){
+  if (esMano(id)){ const mm = S.mano[id.slice(2)]; return mm ? mm.eur : null; }
   const p = k => { const x = precioDe(k); return x===null ? null : S.pos[k].u*x; };
   const suma = (...ks) => { let s=0; for (const k of ks){ const v=p(k); if(v===null) return null; s+=v; } return s; };
   switch(id){
@@ -1520,13 +1548,13 @@ function vivoDe(id){
     case 'pens': return S.mano.pens.eur;
     case 'world':return p('world');
     case 'nasdaq':return p('nasdaq');
-    case 'rv':   { const s = suma('world','nasdaq'); return s === null ? null : s + manoRv(); }
+    case 'rv':   return suma('world','nasdaq');       // las acciones sueltas van en su propia rama
     case 'btc':  return p('btc');
     case 'eth':  return suma('eth','steth');        // stETH es Ethereum, con feed propio
     case 'cri':  return suma('btc','eth','steth');
     case 'oro':  return p('oroU');
     case 'invertido': { const ps = ['rv','fin','cri','oro','pens'].map(vivoDe);
-      return ps.some(v=>v===null) ? null : ps.reduce((a,b)=>a+b,0); }
+      return ps.some(v=>v===null) ? null : ps.reduce((a,b)=>a+b,0) + manoRv(); }
     case 'int': {                                    // intereses: los alimenta el campo de Mes
       const l = D.largo && D.largo.int; if (!l) return null;
       let v = l.saldo[l.saldo.length-1]; const ult = l.meses[l.meses.length-1];
@@ -1539,10 +1567,14 @@ function vivoDe(id){
 function apDe(id, ym){
   let s = 0;
   S.mov.forEach(v => { if (v.u===null || v.traspaso || v.f.slice(0,7)!==ym) return;
-    if (v.tipo === 'venta'){ if (v.rama==='rv' && (id==='rv'||id==='invertido')) s -= v.eur; return; }
+    // acciones a mano: su propia rama (y el invertido si son de renta variable)
+    if (v.manoKey){
+      const mia = id === 'm:'+v.manoKey || (v.rama==='rv' && id==='invertido');
+      if (mia) s += v.tipo==='venta' ? -v.eur : v.eur;
+      return; }
+    if (v.tipo === 'venta') return;
     const k = v.activo==='Finizens' ? 'fin' : CLAVE_ACT[v.activo];
-    if (k && (RAMAS_DE[k]||[]).includes(id)) s += v.eur;
-    else if (!k && v.rama==='rv' && (id==='rv'||id==='invertido')) s += v.eur; });
+    if (k && (RAMAS_DE[k]||[]).includes(id)) s += v.eur; });
   const mm = S.meses[ym], m = mm && mm.aplicado;
   if (m){
     if (id==='pens'||id==='invertido') s += m.pens || 0;
@@ -1557,22 +1589,24 @@ function apDe(id, ym){
 // añade (o sustituye) el punto del mes en curso al final de una serie
 function conHoy(s, id){
   const v = vivoDe(id);
-  if (v===null || !s.meses || !s.meses.length) return s;
+  if (v===null || !s.meses) return s;
   const ym = HOY.slice(0,7);
-  if (s.meses[s.meses.length-1] > ym) return s;      // la serie ya va por delante
+  if (s.meses.length && s.meses[s.meses.length-1] > ym) return s;   // la serie ya va por delante
   const meses=[...s.meses], saldo=[...s.saldo], ap=[...(s.ap||[])], mk=[...(s.mk||[])];
   // los cierres guardados estiran la serie por los meses que el histórico no cubre
+  // (para una acción a mano, SON la serie entera)
   Object.keys(S.cierres || {}).sort().forEach(cm => {
-    if (cm <= meses[meses.length-1] || cm >= ym) return;
+    if ((meses.length && cm <= meses[meses.length-1]) || cm >= ym) return;
     const V = S.cierres[cm][id]; if (V === undefined) return;
     const A = apDe(id, cm);
-    meses.push(cm); saldo.push(V); ap.push(A); mk.push(V - saldo[saldo.length-2] - A);
+    meses.push(cm); saldo.push(V); ap.push(A);
+    mk.push(saldo.length >= 2 ? V - saldo[saldo.length-2] - A : null);
   });
   let apPrevio = 0;
-  if (meses[meses.length-1] === ym){ meses.pop(); saldo.pop(); apPrevio = ap.pop() || 0; mk.pop(); }
+  if (meses.length && meses[meses.length-1] === ym){ meses.pop(); saldo.pop(); apPrevio = ap.pop() || 0; mk.pop(); }
   const aport = apPrevio + apDe(id, ym);
   meses.push(ym); saldo.push(v); ap.push(aport);
-  mk.push(v - saldo[saldo.length-2] - aport);
+  mk.push(saldo.length >= 2 ? v - saldo[saldo.length-2] - aport : null);
   return {...s, meses, saldo, ap, mk, vivo:true};
 }
 // Un desajuste entre lo que pagaste por unidad y lo que la app cree que vale esa
@@ -1617,7 +1651,28 @@ const et = ym => MESC[ym.slice(5)]+'-'+ym.slice(2,4);
 let eSel='total', ePer=0;
 // scrub = el mes que el dedo está tocando en la gráfica; null = ninguno
 let scrub = null, GRAF = null;
-$('eQue').innerHTML = RAMAS.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
+// las acciones a mano entran en el selector como ramas propias: las de renta
+// variable bajo Finizens, las del yolo bajo Liquidez. Aparecen y desaparecen
+// con la cartera (comprar una, vender una), así que el selector se rehace.
+function ramasEvo(){
+  const out = [];
+  RAMAS.forEach(r => { out.push(r);
+    const sub = r.id==='fin' ? manoIds(m=>m.rv) : r.id==='liq' ? manoIds(m=>m.yolo) : [];
+    sub.forEach(id => out.push({id, n:'      · '+S.mano[id.slice(2)].n, tipo:'cotiza', mano:true}));
+  });
+  return out;
+}
+function rellenarSelect(sel, ramas, actual){
+  const firma = ramas.map(r=>r.id).join('|');
+  if (sel.dataset.firma !== firma){
+    sel.innerHTML = ramas.map(r=>`<option value="${r.id}">${r.n.replace(/ /g,' ')}</option>`).join('');
+    sel.dataset.firma = firma;
+  }
+  const ok = ramas.some(r=>r.id===actual) ? actual : ramas[0].id;
+  if (sel.value !== ok) sel.value = ok;
+  return ok;
+}
+rellenarSelect($('eQue'), ramasEvo(), eSel);
 function eSerie(){
   // «Patrimonio total» se construye desde LAS FOTOS, que son su única fuente:
   // así, al hacer una foto la curva crece en el acto. Antes leía un array
@@ -1632,6 +1687,9 @@ function eSerie(){
     return {meses:f.map(x=>x.f.slice(0,7)), fechas:f.map(x=>x.f), saldo:f.map(x=>x.v),
             ap:f.map(()=>null), mk:f.map(()=>null)};
   }
+  // una acción a mano no tiene histórico importado: su serie son los cierres
+  // que la app le ha ido guardando más el punto de hoy
+  if (esMano(eSel)) return conHoy({meses:[], saldo:[], ap:[], mk:[], desdeCero:true}, eSel);
   const largo = D.largo && D.largo[eSel], corta = D.series[eSel];
   const base = (largo && (ePer===0 || !corta)) ? {...largo, recon:true}
              : corta ? {meses:D.meses, ...corta} : null;
@@ -1639,6 +1697,10 @@ function eSerie(){
   return conHoy(base, eSel);        // el histórico llega hasta el corte; el resto lo pone la app
 }
 function rEvo(){
+  // el selector se rehace ANTES de nada: si la rama elegida ya no existe
+  // (una acción vendida), se vuelve a Patrimonio total en vez de quedarse
+  // colgado en «Sin histórico» con la opción fantasma en el desplegable
+  eSel = rellenarSelect($('eQue'), ramasEvo(), eSel);
   // sin histórico importado no hay nada que dibujar, y se dice
   if (!eSerie().meses.length){
     $('eTitulo').textContent = 'Sin histórico';
@@ -1648,7 +1710,7 @@ function rEvo(){
       seguridad, no en la app. Impórtala desde Fotos → Respaldo.</div>`;
     $('ePie').innerHTML = ''; return;
   }
-  const r = RAMAS.find(x=>x.id===eSel), s = eSerie();
+  const r = ramasEvo().find(x=>x.id===eSel), s = eSerie();
   const n = ePer===0 ? s.meses.length : Math.min(ePer, s.meses.length);
   const i0 = Math.max(0, s.meses.length-n);
   const ms=s.meses.slice(i0), sa=s.saldo.slice(i0), ap=s.ap.slice(i0), mk=s.mk.slice(i0);
@@ -1734,6 +1796,9 @@ function rEvo(){
   $('ePie').innerHTML = eSel==='total'
     ? `Esta cifra es <b>tu última foto</b> (${et(ms[ms.length-1])}). Hazte una en Fotos para
        mover esta curva: aquí no valen los precios del momento, valen las fotos.`
+    : esMano(eSel)
+      ? `Esta acción se valora <b>a mano</b> (su valor lo tecleas en Fotos). La app la conoce desde
+         ${et(ms[0])}: cada mes guarda su cierre y la curva va creciendo sola.`
     : s.vivo
       ? `El último punto es de <b>hoy</b>: lo que valen ahora tus unidades, con los precios de la
          cabecera. Los meses anteriores son cierres de mes del histórico.`
