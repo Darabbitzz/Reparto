@@ -1296,11 +1296,12 @@ function aportEntre(id, ymDesde, ymHasta){
    apunta entero al año en que termina (fila marcada en .cruza). */
 const DET_ID = {'Bitcoin':'btc','Ethereum':'eth','Core MSCI World':'world','Nasdaq 100':'nasdaq',
                 'Finizens':'fin','Plan de pensiones':'pens','Oro':'oro'};
-function anualVivo(){
+function anualVivo(hoy){
+  hoy = hoy || HOY;                                   // parámetro solo para poder simular otro año
   const filas = ANUAL.map(a => ({...a, det:(a.det||[]).map(d=>({...d}))}));
   const vHoy = vivoDe('invertido');
   if (vHoy === null) return filas;                    // sin precio: congelado tal cual
-  const hoyYm = HOY.slice(0,7);
+  const hoyYm = hoy.slice(0,7);
   const cierres = Object.keys(S.cierres||{}).filter(ym => S.cierres[ym].invertido !== undefined).sort();
   let ancla = filas.length ? ymAdd(((S.hist && S.hist.corte) || '2026-08-05').slice(0,7), -1)
                            : (cierres[0] || null);
@@ -1317,11 +1318,22 @@ function anualVivo(){
       if (V0 === null || V1 === null) return;
       const A = aportDe(d, h), base = V0 + A/2;
       if (base <= 0) return;
-      const y = h.slice(0,4);
-      const t = por[y] = por[y] || {f:1, eur:0, cruza:false};
-      t.f *= 1 + (V1 - V0 - A)/base;
-      t.eur += V1 - V0 - A;
-      if (ymAdd(d,1).slice(0,4) !== y) t.cruza = true;
+      const r = (V1 - V0 - A)/base, eur = V1 - V0 - A;
+      if (1 + r <= 0) return;
+      // meses que abarca el tramo. Si hay hueco (no se abrió la app algún
+      // mes), el rendimiento se reparte uniforme mes a mes para que cada
+      // año reciba lo suyo: aproximación, y la fila lo marca con ≈
+      const meses = []; let ym = ymAdd(d, 1);
+      while (ym <= h){ meses.push(ym); ym = ymAdd(ym, 1); }
+      const n = Math.max(meses.length, 1), fm = Math.pow(1 + r, 1/n);
+      meses.forEach(m => {
+        const y = m.slice(0,4);
+        const t = por[y] = por[y] || {f:1, eur:0, aprox:false, hoy:false, ult:m};
+        t.f *= fm; t.eur += eur/n;
+        if (n > 1) t.aprox = true;
+        if (m === hoyYm) t.hoy = true;
+        if (m > t.ult) t.ult = m;
+      });
     });
     return por;
   };
@@ -1364,8 +1376,11 @@ function anualVivo(){
       fila.int = { n: b.n + intApp, b: (b.b || b.n) + intApp,
                    pts: b.pts + (S.cuentaTR.saldo > 0 ? intApp/S.cuentaTR.saldo*100 : 0) }; }
     fila.viva = true;
+    // un año que ya no recibe el tramo de hoy está CERRADO en su último cierre
     fila.nota = (fila.ipc === null || fila.ipc === undefined ? 'IPC sin publicar' :
-      `IPC ${fila.ipc.toFixed(2).replace('.',',')} %`) + ` · a ${HOY.split('-').reverse().join('/')}${t.cruza ? ' · ≈' : ''}`;
+      `IPC ${fila.ipc.toFixed(2).replace('.',',')} %`)
+      + (t.hoy ? ` · a ${hoy.split('-').reverse().join('/')}` : ` · cerrado en ${et(t.ult)}`)
+      + (t.aprox ? ' · ≈ hubo meses sin abrir la app' : '');
   });
   filas.sort((a,b) => a.a - b.a);
   return filas;
