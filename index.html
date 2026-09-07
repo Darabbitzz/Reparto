@@ -262,7 +262,9 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
        font-size:13px;line-height:1.5}
 .aviso b{display:block;font-size:11px;text-transform:uppercase;color:var(--warning);margin-bottom:4px}
 /* FOTOS */
-.vm{display:flex;align-items:center;gap:12px;padding:12px 16px}
+.vm{display:flex;align-items:center;gap:12px;padding:12px 16px;flex-wrap:wrap}
+.venta{display:flex;gap:8px;flex:1 1 100%;align-items:center}
+.venta input{flex:1;height:40px;padding:10px;border:1px solid var(--hairline);border-radius:var(--r);font:700 15px/1.25 inherit;outline:none}
 .vm+.vm{border-top:1px solid var(--hairline)}
 .vm .nm{flex:1;font-size:15px}
 .vm .nm small{display:block;font-size:12px;color:var(--mute)}
@@ -572,8 +574,11 @@ function migrar(s){
       s.planos.yolo -= v.eur;
       const mm = s.mano[key] = s.mano[key] || {n:v.activo, eur:0, fecha:v.f, yolo:true, u:0};
       mm.eur += v.eur; mm.u = (mm.u||0)+(v.u||0);
-      v.manoKey = key;
+      v.manoKey = key; v.rama = 'yolo';
     } });
+  // las acciones a mano creadas antes de que existiera el coste: lo que valen hoy
+  // es la mejor estimación de lo que costaron
+  Object.values(s.mano||{}).forEach(m => { if ((m.yolo||m.rv) && m.coste === undefined) m.coste = m.eur; });
   return s;
 }
 let S;
@@ -785,7 +790,8 @@ function rMes(){
       : c.libre
         ? `<input type="text" placeholder="¿en qué? (nombre)" data-a="${v.id}">
            <input type="text" inputmode="decimal" placeholder="unidades (opcional)" data-u="${v.id}">`
-        : `<select data-a="${v.id}">${c.activos.map(a=>`<option>${a}</option>`).join('')}</select>
+        : `<select data-a="${v.id}">${[...c.activos, ...(c.id==='rv'?['Otra acción…']:[])].map(a=>`<option>${a}</option>`).join('')}</select>
+           ${c.id==='rv' ? `<input type="text" placeholder="nombre de la acción" data-n="${v.id}" hidden>` : ''}
            <input type="text" inputmode="decimal" placeholder="unidades" data-u="${v.id}">`;
     return `<div class="conv"><span class="badge">${c.n}</span>
       <button class="x" data-del="${v.id}">✕</button>
@@ -800,11 +806,19 @@ function rMes(){
     .sort((a,b)=> b.f.localeCompare(a.f) || b.id-a.id);
   $('mHechoTit').hidden = !hechos.length;
   $('mHecho').innerHTML = hechos.length ? '<div class="card">'+hechos.map(v => {
+    if (v.tipo === 'venta'){                      // una venta: lo que te dieron frente a lo que pagaste
+      const res = v.eur - (v.coste || 0);
+      return `<div class="row"><span class="nm">Vendido ${v.activo}<small>${eur(v.eur)} · ${v.f} · pagaste ${eur(v.coste||0)} →
+          <b style="color:${res>=0?'var(--primary-dark)':'var(--error)'}">${res>=0?'+':''}${eur(res)}</b> · a liquidez</small></span>
+        <span class="eu num">${v.u?uds(v.u):raya}</span>
+        <button class="x est" data-del="${v.id}">✕</button></div>`;
+    }
     const d = desajuste(v);
     return `<div class="row"><span class="nm">${v.activo}<small>${eur(v.eur)} · ${v.f}${
-        v.px?` · a ${eur(v.px)} la unidad`:''}</small>${d?`<small class="mal">⚠ la app la valora a
+        v.px?` · a ${eur(v.px)} la unidad`:''}</small>${d?`<small class="mal">⚠ aquel día la app la valoraba a
         ${eur(d.px)}: ${(d.d>0?'pagaste':'te salió')} un ${Math.abs(d.d*100).toFixed(1)} %
-        ${d.d>0?'más':'menos'}. Revisa las unidades: eso no es ganancia ni pérdida.</small>`:''}</span>
+        ${d.d>0?'más':'menos'}. Si son comisiones, <button class="btn sm" data-okpx="${v.id}">vale, es correcto</button>;
+        si no, revisa las unidades.</small>`:''}</span>
       <span class="eu num">${v.u?uds(v.u):raya}</span>
       <button class="x est" data-del="${v.id}">✕</button></div>`; }).join('')+'</div>' : '';
 }
@@ -1009,17 +1023,22 @@ function euCat(id){                                        // euros reales por c
   const pos = cat => Object.entries(S.pos).reduce((s,[k,p]) =>
     s + (p.cat===cat && precioDe(k)!==null ? p.u*precioDe(k) : 0), 0);
   if (id==='rf')  return S.cuentaTR.comp.rf;
-  if (id==='rv')  return pos('rv') + S.mano.fin.eur + S.mano.pens.eur + S.cuentaTR.comp.rv + S.planos.rv;
+  if (id==='rv')  return pos('rv') + S.mano.fin.eur + S.mano.pens.eur + S.cuentaTR.comp.rv + S.planos.rv + manoRv();
   if (id==='cri') return pos('cri') + S.cuentaTR.comp.cri + S.planos.cri;
   if (id==='oro') return pos('oro') + S.cuentaTR.comp.oro + S.planos.oro;
   if (id==='liqY')return S.cuentaTR.comp.liq + S.cuentaTR.comp.yolo + S.planos.liq + S.planos.yolo
                        + manoYolo();
   return 0;
 }
-// las acciones yolo declaradas a mano (GitLab y compañía)
+// las acciones declaradas a mano: las del yolo (GitLab) y las de renta
+// variable (Constellation Energy), cada una en su rama
 function manoYolo(){
   return Object.values(S.mano).reduce((s,m) => s + (m.yolo ? m.eur : 0), 0);
 }
+function manoRv(){
+  return Object.values(S.mano).reduce((s,m) => s + (m.rv ? m.eur : 0), 0);
+}
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g,'');
 function pctObj(id){
   const c = S.config.cats;
   if (id==='liqY') return c.find(x=>x.id==='liq').pct + c.find(x=>x.id==='yolo').pct;
@@ -1138,7 +1157,8 @@ function rPat(){
   const ramas = [
     {n:'Renta fija', liq:S.cuentaTR.comp.rf, nota:'entrada del piso · al 2 % en TR', hijos:[]},
     {n:'Renta variable', liq:S.cuentaTR.comp.rv, pl:S.planos.rv, hijos:[
-      {k:'mano', m:'fin'}, {k:'pos', p:'world'}, {k:'pos', p:'nasdaq'}]},
+      {k:'mano', m:'fin'}, {k:'pos', p:'world'}, {k:'pos', p:'nasdaq'},
+      ...Object.keys(S.mano).filter(k=>S.mano[k].rv).map(k=>({k:'mano', m:k}))]},
     {n:'Cripto', liq:S.cuentaTR.comp.cri, pl:S.planos.cri, hijos:[
       {k:'pos', p:'btc'}, {k:'pos', p:'eth2'}]},
     {n:'Plan de pensiones', liq:0, hijos:[{k:'mano', m:'pens'}]},
@@ -1346,11 +1366,13 @@ function origenVivo(){
   const CLAVE = {'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'};
   S.mov.forEach(v => {
     if (v.f <= corte || v.u === null || v.traspaso) return;  // pendientes y traspasos: aún no son inversión
+    if (v.tipo === 'venta'){ if (v.rama === 'rv') nuevos.rv -= v.eur; return; }  // vender = aportación negativa
     const k = CLAVE[v.activo];
     if (v.activo==='Finizens') nuevos.fin += v.eur;
     else if (k==='world'||k==='nasdaq'){ nuevos.rv += v.eur; nuevos[k] += v.eur; }
     else if (k==='btc'||k==='eth'){ nuevos.cri += v.eur; nuevos[k] += v.eur; }
     else if (k==='oroU') nuevos.oro += v.eur;
+    else if (v.rama === 'rv') nuevos.rv += v.eur;             // acción a mano dentro de renta variable
   });
   Object.entries(S.meses).forEach(([ym,m]) => {              // el plan se aporta al cobrar
     if (ym >= corte.slice(0,7) && m.aplicado && m.aplicado.pens) nuevos.pens += m.aplicado.pens;
@@ -1358,7 +1380,8 @@ function origenVivo(){
   const vpos = ks => { let s=0;
     for (const k of ks){ const p=precioDe(k); if (p===null) return null; s += S.pos[k].u*p; }
     return s; };
-  const val = { world:vpos(['world']), nasdaq:vpos(['nasdaq']), rv:vpos(['world','nasdaq']),
+  const rvPos = vpos(['world','nasdaq']);
+  const val = { world:vpos(['world']), nasdaq:vpos(['nasdaq']), rv:rvPos===null?null:rvPos+manoRv(),
     btc:vpos(['btc']), eth:vpos(['eth','steth']), cri:vpos(['btc','eth','steth']),
     oro:vpos(['oroU']), fin:S.mano.fin.eur, pens:S.mano.pens.eur };
   const O = {};
@@ -1494,7 +1517,7 @@ function vivoDe(id){
     case 'pens': return S.mano.pens.eur;
     case 'world':return p('world');
     case 'nasdaq':return p('nasdaq');
-    case 'rv':   return suma('world','nasdaq');
+    case 'rv':   { const s = suma('world','nasdaq'); return s === null ? null : s + manoRv(); }
     case 'btc':  return p('btc');
     case 'eth':  return suma('eth','steth');        // stETH es Ethereum, con feed propio
     case 'cri':  return suma('btc','eth','steth');
@@ -1513,8 +1536,10 @@ function vivoDe(id){
 function apDe(id, ym){
   let s = 0;
   S.mov.forEach(v => { if (v.u===null || v.traspaso || v.f.slice(0,7)!==ym) return;
+    if (v.tipo === 'venta'){ if (v.rama==='rv' && (id==='rv'||id==='invertido')) s -= v.eur; return; }
     const k = v.activo==='Finizens' ? 'fin' : CLAVE_ACT[v.activo];
-    if (k && (RAMAS_DE[k]||[]).includes(id)) s += v.eur; });
+    if (k && (RAMAS_DE[k]||[]).includes(id)) s += v.eur;
+    else if (!k && v.rama==='rv' && (id==='rv'||id==='invertido')) s += v.eur; });
   const mm = S.meses[ym], m = mm && mm.aplicado;
   if (m){
     if (id==='pens'||id==='invertido') s += m.pens || 0;
@@ -1551,13 +1576,18 @@ function conHoy(s, id){
 // unidad NO es un rendimiento: es que uno de los dos datos está mal. Sin esto,
 // convertir una compra estrenaba una ganancia instantánea (visto el 06/08/2026:
 // una compra de oro salía +20 % el mismo día de comprarla).
+// Se compara contra el precio que tenía la app EL DÍA de convertir (pxApp),
+// no contra el de hoy: con el bitcoin moviéndose un 10 % en semanas, comparar
+// con hoy convertía cualquier conversión antigua en un aviso falso (visto el
+// 07/09/2026). Sin precio de aquel día no se juzga; y si pagaste comisión de
+// verdad, «vale» lo acalla (v.ok). En cripto la tolerancia es mayor: spread.
 function desajuste(v){
+  if (v.ok || v.tipo === 'venta') return null;
   const k = CLAVE_ACT[v.activo];
-  if (!k || !v.px || !isFinite(v.px)) return null;
-  const px = precioDe(k);
-  if (px === null) return null;
-  const d = v.px/px - 1;
-  return Math.abs(d) > 0.03 ? {d, px, pagado:v.px} : null;
+  if (!k || !v.px || !isFinite(v.px) || !v.pxApp) return null;
+  const d = v.px/v.pxApp - 1;
+  const tol = (k==='btc'||k==='eth') ? 0.06 : 0.03;
+  return Math.abs(d) > tol ? {d, px:v.pxApp, pagado:v.px} : null;
 }
 
 /* ════════════ RENDER · EVOLUCIÓN (histórico del import + lo de hoy) ════════════ */
@@ -1709,13 +1739,21 @@ function rEvo(){
 
 /* ════════════ RENDER · FOTOS ════════════ */
 let fotoDel = null;              // índice de la foto a la que se le ha tocado el ✕
+let ventaKey = null;             // acción a mano a la que se le ha tocado «Vender»
 let fotPag = 0;                  // página de la lista de fotos; 0 = las más recientes
 function rFot(){
   $('fMano').innerHTML = Object.entries(S.mano).map(([k,m]) => {
     const d = dias(m.fecha);
-    return `<div class="vm"><span class="nm">${m.n}<small>declarado el ${m.fecha}</small></span>
+    // las acciones a mano (yolo o renta variable) se pueden vender: el dinero
+    // vuelve a liquidez y queda apuntado en Convertido con su resultado
+    const vendible = m.yolo || m.rv;
+    const venta = !vendible ? '' : ventaKey === k
+      ? `<div class="venta"><input type="text" inputmode="decimal" id="vEur" placeholder="¿por cuánto la vendiste?">
+           <button class="btn p sm" data-vok="${k}">Vendida</button></div>`
+      : `<button class="btn sm" data-vender="${k}">Vender</button>`;
+    return `<div class="vm"><span class="nm">${m.n}<small>${m.u>0?uds(m.u)+' uds · ':''}${m.rv?'renta variable · ':m.yolo?'yolo · ':''}declarado el ${m.fecha}</small></span>
       <span class="chip ${d>30?'warn':''}">hace ${d} días</span>
-      <input type="text" inputmode="decimal" value="${m.eur}" data-mano="${k}"></div>`; }).join('');
+      <input type="text" inputmode="decimal" value="${m.eur}" data-mano="${k}">${venta}</div>`; }).join('');
   const P = patrimonio();
   const ok = !P.parcial;
   $('fTotal').textContent = ok ? eur(P.total) : raya;
@@ -1814,8 +1852,9 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b) return;
-  // el «¿quitar?» de una foto caduca en cuanto tocas cualquier otra cosa
+  // el «¿quitar?» de una foto y el «¿por cuánto?» de una venta caducan en cuanto tocas otra cosa
   if (fotoDel !== null && b.dataset.fok === undefined && b.dataset.fdel === undefined) fotoDel = null;
+  if (ventaKey !== null && b.dataset.vok === undefined && b.dataset.vender === undefined) ventaKey = null;
   if (b.dataset.s){ document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
     ['mes','pat','evo','pro','fot'].forEach(s=>$('s-'+s).classList.toggle('on', s===b.dataset.s)); return; }
   if (b.id==='eye'){ document.body.classList.toggle('hide');
@@ -1867,41 +1906,63 @@ document.addEventListener('click', e => {
       // la acción yolo nace como VALOR A MANO (decidido el 27/08/2026): sale
       // de los euros planos y aparece en Patrimonio con su nombre; el valor
       // se edita en Fotos, como Finizens. Arranca valiendo lo que costó.
-      const key = 'y_' + a.toLowerCase().replace(/[^a-z0-9]+/g,'');
+      const key = 'y_' + slug(a);
       S.planos[v.cat] -= v.eur;
-      const mm = S.mano[key] = S.mano[key] || {n:a, eur:0, fecha:HOY, yolo:true, u:0};
-      mm.eur += v.eur; mm.u = (mm.u||0)+(v.u||0); mm.fecha = HOY;
-      v.manoKey = key;
+      const mm = S.mano[key] = S.mano[key] || {n:a, eur:0, coste:0, fecha:HOY, yolo:true, u:0};
+      mm.eur += v.eur; mm.coste = (mm.coste||0) + v.eur; mm.u = (mm.u||0)+(v.u||0); mm.fecha = HOY;
+      v.manoKey = key; v.rama = 'yolo';
     } else { if(!(isFinite(u)&&u>0)) return;
-      v.activo=a; v.u=u; v.px=v.eur/u;      // lo que pagaste por unidad: se guarda para poder comparar
+      let nombre = a;
+      if (a === 'Otra acción…'){                 // acción suelta dentro de renta variable
+        const en = document.querySelector(`[data-n="${v.id}"]`);
+        nombre = en ? en.value.trim() : '';
+        if (!nombre) return;
+      }
+      v.activo=nombre; v.u=u; v.px=v.eur/u;    // lo que pagaste por unidad, para poder comparar
       // CONVERSIÓN: los euros planos dejan de existir, nacen unidades
       S.planos[v.cat] -= v.eur;
-      const clave={'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'}[a];
-      if (clave) S.pos[clave].u += u;
-      else if (a==='Finizens'){ S.mano.fin.eur += v.eur; }   // Finizens va a valor a mano
+      const clave = CLAVE_ACT[nombre];
+      if (clave){ S.pos[clave].u += u; v.pxApp = precioDe(clave) ?? undefined; }  // el precio de la app AQUEL día
+      else if (nombre==='Finizens'){ S.mano.fin.eur += v.eur; }   // Finizens va a valor a mano
+      else {
+        // acción a mano DENTRO de renta variable (Constellation Energy y las que
+        // vengan): cuenta en el invertido, en la tarta y en el año a año; el
+        // valor lo actualizas tú en Fotos. Decidido el 07/09/2026.
+        const key = 'a_' + slug(nombre);
+        const mm = S.mano[key] = S.mano[key] || {n:nombre, eur:0, coste:0, fecha:HOY, rv:true, u:0};
+        mm.eur += v.eur; mm.coste = (mm.coste||0) + v.eur; mm.u = (mm.u||0) + u; mm.fecha = HOY;
+        v.manoKey = key; v.rama = 'rv';
+      }
     }
     render(); return; }
   if (b.dataset.del){
     const i=S.mov.findIndex(x=>x.id==b.dataset.del);
     if (i>=0){ const v=S.mov[i], c=S.config.cats.find(x=>x.id===v.cat);
+      // deshacer una VENTA: la acción vuelve tal como estaba y el dinero sale de liquidez
+      if (v.tipo === 'venta'){
+        S.cuentaTR.saldo -= v.eur; S.cuentaTR.comp.liq -= v.eur;
+        if (!S.mano[v.manoKey] && v.copia) S.mano[v.manoKey] = {...v.copia};
+        S.mov.splice(i,1); render(); return;
+      }
       // el apunte a deshacer vive en el mes del movimiento (los movimientos
       // viejos no llevan ym: se estima por su fecha)
       const m=S.meses[v.ym || v.f.slice(0,7)] || mes();
       // deshacer TODO: unidades, planos, cuenta y aportado del mes
-      if (v.u!==null && !v.traspaso && !c.libre){
-        const clave={'Core MSCI World':'world','Nasdaq 100':'nasdaq','Bitcoin':'btc','Ethereum':'eth','ETF oro físico':'oroU'}[v.activo];
+      if (v.u!==null && !v.traspaso && !c.libre && !v.manoKey){
+        const clave = CLAVE_ACT[v.activo];
         if (clave) S.pos[clave].u -= v.u;
         else if (v.activo==='Finizens') S.mano.fin.eur -= v.eur;
         S.planos[v.cat] += v.eur;                     // vuelven los planos antes de anularlos
       }
-      // deshacer una acción yolo: sale del valor a mano y vuelve a planos.
-      // Si era el único movimiento de esa acción, la entrada se va ENTERA
-      // (aunque le hubieras declarado un valor mayor: era la valoración de
-      // algo que ya no existe, dejarla sería un fantasma de 30 €).
-      if (v.u!==null && c.libre && v.manoKey){
+      // deshacer una acción a mano (yolo o renta variable): sale del valor a
+      // mano y vuelve a planos. Si era el único movimiento de esa acción, la
+      // entrada se va ENTERA (aunque le hubieras declarado un valor mayor:
+      // era la valoración de algo que ya no existe; dejarla sería un fantasma).
+      if (v.u!==null && v.manoKey){
         const mm = S.mano[v.manoKey];
         if (mm){
-          mm.eur = Math.max(mm.eur - v.eur, 0); mm.u = Math.max((mm.u||0)-(v.u||0), 0);
+          mm.eur = Math.max(mm.eur - v.eur, 0); mm.coste = Math.max((mm.coste||0) - v.eur, 0);
+          mm.u = Math.max((mm.u||0)-(v.u||0), 0);
           if (!S.mov.some(x => x !== v && x.manoKey === v.manoKey)) delete S.mano[v.manoKey];
         }
         S.planos[v.cat] += v.eur;
@@ -1931,6 +1992,23 @@ document.addEventListener('click', e => {
     S.fotos.push({f:HOY, v:Math.round(P.total), hoja:false});
     render(); return; }
   if (b.dataset.fpag){ fotPag += +b.dataset.fpag; rFot(); return; }
+  // vender una acción a mano: primer toque pregunta por cuánto, segundo apunta
+  if (b.dataset.vender !== undefined){ ventaKey = b.dataset.vender; rFot();
+    const i = $('vEur'); if (i){ i.focus(); } return; }
+  if (b.dataset.vok !== undefined){
+    const key = b.dataset.vok, mm = S.mano[key], inp = $('vEur');
+    const eurV = inp ? dec(inp.value) : NaN;
+    if (mm && isFinite(eurV) && eurV >= 0){
+      // el dinero vuelve a la cuenta, al bolsillo de liquidez; la acción se va
+      // y queda apuntada como venta en Convertido, con copia para poder deshacer
+      S.cuentaTR.saldo += eurV; S.cuentaTR.comp.liq += eurV;
+      S.mov.push({id:Date.now()+Math.random(), tipo:'venta', cat:'liq', eur:eurV, f:HOY, ym:ymAct,
+        activo:mm.n, u:mm.u||0, manoKey:key, rama: mm.rv?'rv':'yolo', coste: mm.coste ?? mm.eur, copia:{...mm}});
+      delete S.mano[key];
+    }
+    ventaKey = null; render(); return; }
+  // el aviso de precio: «vale, es correcto» lo acalla para ese movimiento
+  if (b.dataset.okpx){ const v = S.mov.find(x=>x.id==b.dataset.okpx); if (v) v.ok = true; render(); return; }
   // quitar foto: primer toque pregunta, segundo quita; tocar otra cosa lo anula
   if (b.dataset.fdel !== undefined){ fotoDel = +b.dataset.fdel; rFot(); return; }
   if (b.dataset.fok !== undefined){
@@ -1988,6 +2066,14 @@ $('fFile').onchange = e => {
 
 $('eQue').onchange = e => { eSel=e.target.value; scrub=null; rEvo(); };
 $('prQue').onchange = e => { prSel = e.target.value; rPro(); };
+// en la bandeja de renta variable, «Otra acción…» descubre el campo del nombre
+document.addEventListener('change', e => {
+  const s = e.target;
+  if (s.tagName === 'SELECT' && s.dataset.a !== undefined){
+    const n = document.querySelector(`[data-n="${s.dataset.a}"]`);
+    if (n){ n.hidden = s.value !== 'Otra acción…'; if (!n.hidden) n.focus(); }
+  }
+});
 document.querySelectorAll('#prAnios button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('#prAnios button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); prN = +b.dataset.a; rPro(); });
