@@ -209,6 +209,11 @@ function construir(opciones) {
     }
   });
 
+  // --- bloque `ipc`: la inflación del INE, para que el veredicto de cada año
+  // aparezca solo cuando se publique. Regla 2 de (b): si el INE no responde,
+  // se conserva el bloque anterior. ---
+  var ipc = leerIpc(descargas.ine, previo, avisos);
+
   var json = {
     schema: 1,
     generado: ahora,
@@ -216,10 +221,35 @@ function construir(opciones) {
     monedaBase: 'EUR',
     fx: fx,
     precios: precios,
-    historico: historico
+    historico: historico,
+    ipc: ipc
   };
 
   return { json: json, avisos: avisos, cambia: hayCambio(json, previo) };
+}
+
+// IPC: serie IPC251856 del INE (Nacional, índice general, variación anual, mensual).
+// `anual` guarda el interanual de DICIEMBRE de cada año —lo comparable con el
+// rendimiento de un año natural— y `ultimo`, el mes más reciente publicado.
+// El INE rebasa la serie cada pocos años y el código puede cambiar: si deja de
+// responder, se conserva el bloque anterior y se avisa.
+function leerIpc(descarga, previo, avisos) {
+  if (esObjeto(descarga) && descarga.ok === true && Array.isArray(descarga.datos) && descarga.datos.length) {
+    var anual = {}, ultimo = null;
+    descarga.datos.forEach(function (p) {
+      if (!isFinite(p.valor)) return;
+      if (p.mes === 12) anual[String(p.anyo)] = p.valor;
+      var periodo = String(p.anyo) + '-' + String(p.mes).padStart(2, '0');
+      if (ultimo == null || periodo > ultimo.periodo) ultimo = { periodo: periodo, valor: p.valor };
+    });
+    return { fuente: 'INE', serie: descarga.serie || 'IPC251856', anual: anual, ultimo: ultimo };
+  }
+  if (previo && esObjeto(previo.ipc)) {
+    avisos.push({ codigo: 'ine_caido', mensaje: 'el INE no respondió; se conserva el bloque ipc anterior' });
+    return copia(previo.ipc);
+  }
+  avisos.push({ codigo: 'ine_caido', mensaje: 'el INE no respondió y no había bloque ipc previo' });
+  return null;
 }
 
 // Regla 3 de (b): un mes sin dato se omite. Ni se interpola ni se arrastra el anterior.
@@ -299,6 +329,20 @@ async function bajarCoingecko(buscar, id, dias) {
   };
 }
 
+var URL_INE = 'https://servicios.ine.es/wstempus/js/ES/DATOS_SERIE/IPC251856?nult=60';
+
+async function bajarIne(buscar) {
+  var cuerpo = await pedirJson(buscar, URL_INE);
+  if (!cuerpo || !Array.isArray(cuerpo.Data)) throw new Error('respuesta del INE sin datos');
+  return {
+    ok: true,
+    serie: typeof cuerpo.Nombre === 'string' ? cuerpo.Nombre.trim() : null,
+    datos: cuerpo.Data
+      .filter(function (x) { return esObjeto(x) && isFinite(x.Valor) && isFinite(x.Anyo) && isFinite(x.FK_Periodo); })
+      .map(function (x) { return { anyo: Number(x.Anyo), mes: Number(x.FK_Periodo), valor: Number(x.Valor) }; })
+  };
+}
+
 // Un intento y un reintento, igual que el módulo `precios`. Un símbolo que falla no tumba el
 // fichero: se anota y el resto sigue (regla 5 de (d)).
 async function conReintento(esperar, fn) {
@@ -346,6 +390,8 @@ async function ejecutar(opciones) {
     descargas.coingecko[cg] = await conReintento(esperar,
       bajarCoingecko.bind(null, buscar, cg, diasCripto));
   }
+
+  descargas.ine = await conReintento(esperar, bajarIne.bind(null, buscar));
 
   return construir({
     tickers: op.tickers, previo: op.previo, descargas: descargas,

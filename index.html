@@ -401,9 +401,7 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 
   <div class="eyebrow">¿Le ganas a la inflación?</div>
   <div class="card" id="pIpc"></div>
-  <div class="note">IPC del INE, interanual a diciembre: <b>2023 3,41 % · 2024 2,94 % · 2025
-    2,92 %</b> (a nov). El de 2026 no está publicado. La TIR sale del histórico del import, a su
-    fecha de corte: lo convertido después aún no la mueve.</div>
+  <div class="note" id="pIpcNota"></div>
 
   <div class="eyebrow">La cartera, año a año</div>
   <div class="card" id="pAnual"></div>
@@ -1252,7 +1250,16 @@ function rTR(){
 }
 
 /* ── bloques analíticos: invertido, origen, IPC, año a año ─────────────── */
-const IPC = {2023:3.41, 2024:2.94, 2025:2.92}, IPC_MEDIO = 3.09;
+// IPC interanual de DICIEMBRE por año (INE, serie IPC251856): lo comparable con
+// el rendimiento de un año natural. Arranca con los valores conocidos y lo pisa
+// el bloque `ipc` de precios.json, que el workflow baja del INE a diario: así el
+// veredicto de cada año aparece solo cuando el INE publica, sin tocar código.
+let IPC = {2023:3.1, 2024:2.8, 2025:2.9}, IPC_ULTIMO = null;
+// solo cuentan los años en los que la cartera existía (el INE trae desde 2021)
+const anioOrigen = () => { const d = ORIGEN.invertido && ORIGEN.invertido.desde;
+  return d ? parseInt(d.slice(-4), 10) : 2023; };
+const aniosIpc = () => Object.keys(IPC).filter(y => +y >= anioOrigen()).sort();
+const ipcMedio = () => { const v = aniosIpc().map(y => IPC[y]); return v.length ? v.reduce((a,b)=>a+b,0)/v.length : 0; };
 
 /* ── cierres mensuales automáticos ──
    La primera vez que la app se abre en un mes nuevo, guarda el cierre del mes
@@ -1299,6 +1306,13 @@ const DET_ID = {'Bitcoin':'btc','Ethereum':'eth','Core MSCI World':'world','Nasd
 function anualVivo(hoy){
   hoy = hoy || HOY;                                   // parámetro solo para poder simular otro año
   const filas = ANUAL.map(a => ({...a, det:(a.det||[]).map(d=>({...d}))}));
+  // el IPC de cada año lo pone el INE (pisa el que viajara en el import); para
+  // el año sin diciembre publicado vale el último mes disponible, como provisional
+  const conIpc = f => { const y = String(f.a);
+    if (IPC[y] !== undefined){ f.ipc = IPC[y]; f.ipcProv = null; }
+    else if (IPC_ULTIMO && IPC_ULTIMO.periodo.slice(0,4) === y){ f.ipc = IPC_ULTIMO.valor; f.ipcProv = IPC_ULTIMO.periodo; }
+    return f; };
+  filas.forEach(conIpc);
   const vHoy = vivoDe('invertido');
   if (vHoy === null) return filas;                    // sin precio: congelado tal cual
   const hoyYm = hoy.slice(0,7);
@@ -1349,7 +1363,7 @@ function anualVivo(hoy){
   Object.entries(DET_ID).forEach(([n, id]) => detPor[n] = porId(id));
   Object.entries(inv).forEach(([y, t]) => {
     let fila = filas.find(x => String(x.a) === y);
-    if (!fila){ fila = {a:y, r:0, eur:0, ipc:IPC[y] ?? null, det:[]}; filas.push(fila); }
+    if (!fila){ fila = conIpc({a:y, r:0, eur:0, ipc:null, det:[]}); filas.push(fila); }
     fila.r = ((1 + fila.r/100) * t.f - 1) * 100;
     fila.eur = (fila.eur || 0) + t.eur;
     // el desglose por activo también se encadena, parte a parte
@@ -1378,7 +1392,7 @@ function anualVivo(hoy){
     fila.viva = true;
     // un año que ya no recibe el tramo de hoy está CERRADO en su último cierre
     fila.nota = (fila.ipc === null || fila.ipc === undefined ? 'IPC sin publicar' :
-      `IPC ${fila.ipc.toFixed(2).replace('.',',')} %`)
+      `IPC ${fila.ipc.toFixed(1).replace('.',',')} %${fila.ipcProv ? ' (' + et(fila.ipcProv) + ', provisional)' : ''}`)
       + (t.hoy ? ` · a ${hoy.split('-').reverse().join('/')}` : ` · cerrado en ${et(t.ult)}`)
       + (t.aprox ? ' · ≈ hubo meses sin abrir la app' : '');
   });
@@ -1499,13 +1513,22 @@ function rIpc(){
         }
       }
     }
-    const corto = meses < 12, dif = tir - IPC_MEDIO;
+    const corto = meses < 12, dif = tir - ipcMedio();
     const v = corto ? {c:'x',t:'—'} : dif>1.5 ? {c:'b',t:'Bien'} : dif<-1.5 ? {c:'m',t:'Mal'} : {c:'i',t:'En la línea'};
     return `<div class="fr"><span class="nm">${n}<small>${corto
         ? `solo ${Math.round(meses)} meses · muy poco para comparar`
         : `${(dif>=0?'+':'')+dif.toFixed(1)} puntos sobre el IPC medio${vivo ? ` · a ${fHoy}, encadenada` : ''}`}</small></span>
       <span class="n num ${corto?'na':tir>=0?'up':'dn'}">${corto?'—':(tir>=0?'+':'')+tir.toFixed(1)+' %'}</span>
       <span class="ver ${v.c}">${v.t}</span></div>`; }).join('');
+  // la nota dice qué IPC hay, de dónde y hasta cuándo: nada escrito a mano
+  const anios = aniosIpc();
+  const sinDic = String(new Date(HOY).getFullYear());
+  $('pIpcNota').innerHTML = `IPC del INE, interanual a diciembre: <b>${anios.map(y => y+' '+IPC[y].toFixed(1).replace('.',',')+' %').join(' · ')}</b>
+    · media ${ipcMedio().toFixed(2).replace('.',',')} %. ${IPC_ULTIMO
+      ? `Último mes publicado: ${et(IPC_ULTIMO.periodo)}, ${IPC_ULTIMO.valor.toFixed(1).replace('.',',')} %.`
+      : 'Sin dato mensual todavía.'} ${IPC[sinDic] === undefined
+      ? `El de ${sinDic} aparecerá solo cuando el INE lo publique.` : ''} La TIR es la del histórico
+    encadenada hasta hoy, aproximada.`;
 }
 function rAnual(){
   const filas = anualVivo();
@@ -1516,7 +1539,7 @@ function rAnual(){
       : rTot-a.ipc>1.5 ? {c:'b',t:'Bien'} : rTot-a.ipc<-1.5 ? {c:'m',t:'Mal'} : {c:'i',t:'En la línea'};
     const ab = anioAb === a.a;
     return `<button class="fr anio" data-anio="${a.a}"><span class="chd">${ab?'▾':'▸'}</span>
-      <span class="nm">${a.a}<small>${a.nota || `IPC ${a.ipc.toFixed(2).replace('.',',')} %`}
+      <span class="nm">${a.a}<small>${a.nota || `IPC ${a.ipc.toFixed(1).replace('.',',')} %`}
         · ${(a.eur>=0?'+':'')+eur0(a.eur)}${a.int
           ? `<br>con intereses de TR: <b class="${rTot>=0?'sup':'sdn'}">${(rTot>=0?'+':'')+rTot.toFixed(1)} %</b>` : ''}</small></span>
       <span class="n num ${a.r>=0?'up':'dn'}">${(a.r>=0?'+':'')+a.r.toFixed(1)} %</span>
@@ -2231,6 +2254,11 @@ fetch('precios.json')
       const e = j.precios && j.precios[isin];
       if (e && e.estado==='ok' && isFinite(e.precio) && e.precio > 0)
         PX[k] = {p:e.precio, f:e.fecha, fuente:'precios.json'};
+    }
+    // la inflación del INE, bajada por el workflow: pisa los valores de arranque
+    if (j.ipc && j.ipc.anual){
+      Object.entries(j.ipc.anual).forEach(([y,v]) => { if (isFinite(v)) IPC[y] = v; });
+      if (j.ipc.ultimo && isFinite(j.ipc.ultimo.valor)) IPC_ULTIMO = j.ipc.ultimo;
     }
     render();
   })
