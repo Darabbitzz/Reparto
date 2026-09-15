@@ -278,6 +278,10 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 .ft .d{width:78px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:var(--mute)}
 .ft .d.up{color:var(--primary-dark);font-weight:700} .ft .d.dn{color:var(--error);font-weight:700}
 .ft.nueva{background:var(--surface-soft)}
+/* de dónde sale la diferencia con la foto anterior: una línea bajo la foto */
+.ft{flex-wrap:wrap}
+.ft .fx{flex:1 1 100%;font-size:11px;line-height:1.5;color:var(--mute);padding-top:1px}
+.ft .fx .up{color:var(--primary-dark)} .ft .fx .dn{color:var(--error)}
 .fchapter{background:var(--surface-dark);color:var(--on-dark);margin-top:28px;padding:28px 16px;text-align:center}
 .fchapter .k{font-size:11px;font-weight:700;text-transform:uppercase;color:var(--on-dark-mute)}
 .fchapter .v{font-size:40px;font-weight:700;margin:6px 0 2px}
@@ -286,7 +290,7 @@ tr.tot td{border-top:2px solid var(--ink);font-weight:700}
 .hide .num,.hide .f input,.hide .vm input,.hide .row .nm small,.hide .conv .t,
 .hide .note b,.hide .chapter .foot b,.hide .n2 .nm small,.hide .fr .nm small,
 .hide .fr .n,.hide .dl b,.hide .dl em,.hide .chapter .l b,.hide .chapter .l .pc,
-.hide #pRend .l span span,
+.hide #pRend .l span span,.hide .ft .fx,.hide #fDetalle,
 .hide #eTabla td:not(:first-child),.hide #eDelta,.hide #prDet,.hide .dos .n{filter:blur(7px)}
 /* los números a 34-48px necesitan un desenfoque a su medida: con 7px los dígitos
    aún se adivinaban (avisado por el usuario el 10/08/2026) */
@@ -715,14 +719,17 @@ function rMes(){
   $('mInv').textContent = hay ? eur(inv) : raya;
   $('mGas').textContent = hay ? eur(gasto) : raya;
 
-  // el selector de modo se bloquea en cuanto aportas algo del mes: cambiarlo
-  // entonces recolocaría dinero que ya salió y dejaría bolsillos en rojo
+  // el modo se puede cambiar aunque ya hayas aportado este mes: el reparto se
+  // rehace y, si sacaste más de lo que el modo nuevo asigna, ese bolsillo queda
+  // en negativo y se descuenta del mes que viene. Hasta el 15/09/2026 el
+  // selector se bloqueaba con la primera compra, y una acción suelta comprada a
+  // mitad de mes impedía pasar a autobalance (pedido por el usuario ese día).
   const modo = m.modo || 'pct';
-  const bloqueado = Object.values(m.ap || {}).some(x => x > 0.005);
+  const enRojo = S.config.cats.filter(c => !c.acumula && (S.cuentaTR.comp[c.id] ?? 0) < -0.005);
   $('mModo').innerHTML =
-    `<button data-modo="pct" class="${modo==='pct'?'on':''}" ${bloqueado?'disabled':''}>% fijos</button>
-     <button data-modo="auto" class="${modo==='auto'?'on':''}" ${bloqueado?'disabled':''}>Autobalance</button>`
-    + (bloqueado ? `<span class="fij">Ya has aportado este mes: el modo queda fijado.</span>`
+    `<button data-modo="pct" class="${modo==='pct'?'on':''}">% fijos</button>
+     <button data-modo="auto" class="${modo==='auto'?'on':''}">Autobalance</button>`
+    + (enRojo.length ? `<span class="fij">Has metido más de lo asignado en ${enRojo.map(c=>c.n).join(', ')}: el exceso se descuenta del mes que viene.</span>`
        : modo==='auto' ? `<span class="fij">Renta fija, plan y yolo conservan lo suyo; el resto va a lo más lejos del reparto sin renta fija.</span>` : '');
   let suma = 0;
   $('mCats').innerHTML = S.config.cats.map(c => { suma += c.pct;
@@ -1647,6 +1654,65 @@ function conHoy(s, id){
   mk.push(saldo.length >= 2 ? v - saldo[saldo.length-2] - aport : null);
   return {...s, meses, saldo, ap, mk, vivo:true};
 }
+
+/* ══ El desglose de una foto ══
+   Una foto guardaba un solo número: el total. Con eso la app sabía que el
+   patrimonio había subido 300 € de un día a otro, pero no de dónde: cripto, el
+   World, una aportación. Y las ramas de Evolución solo tenían cierres de mes
+   más el punto de hoy: entre medias, nada. (Pedido el 11/09/2026.)
+   Desde entonces cada foto guarda además lo que valía CADA RAMA en ese
+   instante —el mismo cálculo que pinta el punto «hoy»— y con dos fotos se
+   explica la diferencia. Las fotos viejas no lo tienen y no se inventa. */
+function desgloseHoy(){
+  const d = {};
+  ramasEvo().forEach(r => { if (r.id==='total') return;
+    const v = vivoDe(r.id); if (v!==null && isFinite(v)) d[r.id] = Math.round(v*100)/100; });
+  return d;
+}
+// las hojas: ramas que no se solapan entre sí. Liquidez ya lleva dentro las
+// acciones del yolo; las de renta variable a mano van aparte. Lo que no cae en
+// ninguna (planos, sin asignar) sale como «resto».
+const HOJAS_EVO = ['rf','world','nasdaq','fin','btc','eth','oro','pens','fe','liq'];
+const hojasDesglose = () => HOJAS_EVO.concat(manoIds(m=>m.rv));
+function nombreRama(id){ const r = ramasEvo().find(x=>x.id===id); return r ? r.n.replace(/^[\s·]+/,'') : id; }
+// reparte una diferencia de total entre las hojas, de mayor a menor peso.
+// null si alguna de las dos fotos no lleva desglose.
+function explicar(dAnt, dNue, dTotal){
+  if (!dAnt || !dNue) return null;
+  const partes = [];
+  hojasDesglose().forEach(id => {
+    if (dAnt[id]===undefined || dNue[id]===undefined) return;
+    const d = dNue[id]-dAnt[id]; if (Math.abs(d) >= 0.5) partes.push({id, n:nombreRama(id), d});
+  });
+  partes.sort((a,b)=>Math.abs(b.d)-Math.abs(a.d));
+  const resto = dTotal - partes.reduce((s,p)=>s+p.d,0);
+  if (Math.abs(resto) >= 0.5) partes.push({id:'resto', n:'resto', d:resto});
+  return partes;
+}
+const explicarTxt = (partes, html) => !partes ? '' : !partes.length ? 'sin cambios por rama'
+  : partes.slice(0,5).map(p => { const t = `${p.n} ${p.d>=0?'+':''}${eur0(p.d)}`;
+      return html ? `<span class="${p.d>=0?'up':'dn'}">${t}</span>` : t; }).join(' · ')
+    + (partes.length>5 ? ' · …' : '');
+// entre el último cierre de mes y hoy, las fotos con desglose ponen puntos
+// diarios en la rama: así se ve la semana, no solo el mes. Van marcados con
+// `dia`: se dibujan y se pueden tocar, pero la tabla sigue siendo mensual.
+function conFotos(s, id){
+  if (!s.vivo) return s;
+  const n = s.meses.length, ym = s.meses[n-1], ultCierre = n >= 2 ? s.meses[n-2] : '';
+  const porDia = new Map();
+  [...S.fotos].sort((a,b)=>a.f<b.f?-1:1).forEach(x => {
+    if (x.d && x.d[id]!==undefined && x.f < HOY && x.f.slice(0,7) > ultCierre) porDia.set(x.f, x.d[id]); });
+  if (!porDia.size) return s;
+  const meses=s.meses.slice(0,n-1), saldo=s.saldo.slice(0,n-1), ap=s.ap.slice(0,n-1), mk=s.mk.slice(0,n-1);
+  const fechas = meses.map(m=>m+'-28'), dia = meses.map(()=>false);
+  [...porDia.keys()].sort().forEach(f => { meses.push(f.slice(0,7)); fechas.push(f); dia.push(true);
+    saldo.push(porDia.get(f)); ap.push(null); mk.push(null); });
+  meses.push(ym); fechas.push(HOY); dia.push(false);
+  saldo.push(s.saldo[n-1]); ap.push(s.ap[n-1]); mk.push(s.mk[n-1]);
+  return {...s, meses, fechas, dia, saldo, ap, mk};
+}
+// «10 sep-26»: la etiqueta de un punto que es un día, no un mes
+const etDia = f => (+f.slice(8,10))+' '+et(f.slice(0,7));
 // Un desajuste entre lo que pagaste por unidad y lo que la app cree que vale esa
 // unidad NO es un rendimiento: es que uno de los dos datos está mal. Sin esto,
 // convertir una compra estrenaba una ganancia instantánea (visto el 06/08/2026:
@@ -1727,12 +1793,14 @@ function eSerie(){
   }
   // una acción a mano no tiene histórico importado: su serie son los cierres
   // que la app le ha ido guardando más el punto de hoy
-  if (esMano(eSel)) return conHoy({meses:[], saldo:[], ap:[], mk:[], desdeCero:true}, eSel);
+  if (esMano(eSel)) return conFotos(conHoy({meses:[], saldo:[], ap:[], mk:[], desdeCero:true}, eSel), eSel);
   const largo = D.largo && D.largo[eSel], corta = D.series[eSel];
   const base = (largo && (ePer===0 || !corta)) ? {...largo, recon:true}
              : corta ? {meses:D.meses, ...corta} : null;
   if (!base) return {meses:[], saldo:[], ap:[], mk:[]};
-  return conHoy(base, eSel);        // el histórico llega hasta el corte; el resto lo pone la app
+  // el histórico llega hasta el corte; los cierres y el punto de hoy los pone
+  // la app, y las fotos rellenan los días entre el último cierre y hoy
+  return conFotos(conHoy(base, eSel), eSel);
 }
 function rEvo(){
   // el selector se rehace ANTES de nada: si la rama elegida ya no existe
@@ -1749,9 +1817,15 @@ function rEvo(){
     $('ePie').innerHTML = ''; return;
   }
   const r = ramasEvo().find(x=>x.id===eSel), s = eSerie();
-  const n = ePer===0 ? s.meses.length : Math.min(ePer, s.meses.length);
-  const i0 = Math.max(0, s.meses.length-n);
-  const ms=s.meses.slice(i0), sa=s.saldo.slice(i0), ap=s.ap.slice(i0), mk=s.mk.slice(i0);
+  // «6 meses» cuenta meses: los puntos diarios de las fotos no gastan cupo
+  const diaS = s.dia || [];
+  const mensuales = s.meses.map((_,i)=>i).filter(i=>!diaS[i]);
+  const n = ePer===0 ? mensuales.length : Math.min(ePer, mensuales.length);
+  const i0 = mensuales.length ? mensuales[mensuales.length-n] : Math.max(0, s.meses.length-n);
+  const ms=s.meses.slice(i0), sa=s.saldo.slice(i0), ap=s.ap.slice(i0), mk=s.mk.slice(i0), di=diaS.slice(i0);
+  // etiqueta de un punto: el día si es una foto, el mes si es un cierre
+  const labS = i => s.fechas && (diaS[i] || eSel==='total') ? etDia(s.fechas[i]) : et(s.meses[i]);
+  const lab = i => labS(i0+i);
   $('eTitulo').textContent = r.n.trim();
   const W=340,H=200,P=8, min=Math.min(...sa), max=Math.max(...sa), rg=(max-min)||1;
   // El eje X respeta el TIEMPO, no el número de puntos: tres fotos seguidas en
@@ -1772,18 +1846,23 @@ function rEvo(){
   $('eValor').textContent = eur(sa[foco]);
   const prevIdx = i0 + foco - 1;                    // mes anterior en la serie completa
   const dif = v => `<span class="${v>=0?'up':'dn'}">${v>=0?'+':''}${eur0(v)}</span>`;
-  const partes = [scrub !== null ? `<span class="fecha">${et(ms[foco])}</span>` : `a ${et(ms[foco])}`];
-  if (prevIdx >= 0) partes.push(`vs ${et(s.meses[prevIdx])}: ${dif(sa[foco]-s.saldo[prevIdx])}`);
-  if (foco > 0) partes.push(`desde ${et(ms[0])}: ${dif(sa[foco]-sa[0])}`);
+  const partes = [scrub !== null ? `<span class="fecha">${lab(foco)}</span>` : `a ${lab(foco)}`];
+  if (prevIdx >= 0) partes.push(`vs ${labS(prevIdx)}: ${dif(sa[foco]-s.saldo[prevIdx])}`);
+  if (foco > 0) partes.push(`desde ${lab(0)}: ${dif(sa[foco]-sa[0])}`);
   $('eDelta').innerHTML = partes.join(' · ');
   let path='',pts='',ejes='';
+  // una etiqueta de mes cada quinta parte de la serie, sin pisar la última:
+  // con las fotos diarias apiñadas a la derecha, la penúltima se le echaba encima
+  const paso = Math.ceil(ms.length/5), xUlt = X(ms.length-1);
+  const conEje = i => i===ms.length-1 || (i%paso===0 && xUlt - X(i) > 44);
   ms.forEach((m,i)=>{
     const hueco = r.huecos && r.huecos.includes(m);
     path += (i===0?'M':'L')+X(i).toFixed(1)+' '+Y(sa[i]).toFixed(1)+' ';
     if (hueco) pts+=`<circle cx="${X(i)}" cy="${Y(sa[i])}" r="3.5" fill="var(--canvas)" stroke="var(--warning)" stroke-width="2"/>`;
     else if (eSel==='fe'&&i>0&&sa[i]<sa[i-1]) pts+=`<circle cx="${X(i)}" cy="${Y(sa[i])}" r="3.5" fill="var(--error)"/>`;
+    else if (di[i]) pts+=`<circle cx="${X(i)}" cy="${Y(sa[i])}" r="1.8" fill="var(--primary)" opacity=".7"/>`;
     else pts+=`<circle cx="${X(i)}" cy="${Y(sa[i])}" r="2.5" fill="var(--primary)"/>`;
-    if (i%Math.ceil(ms.length/5)===0||i===ms.length-1)
+    if (conEje(i))
       ejes+=`<text class="gx" x="${X(i)}" y="${H-6}" text-anchor="${i===0?'start':i===ms.length-1?'end':'middle'}">${et(m)}</text>`;
   });
   // guía vertical y punto gordo bajo el dedo
@@ -1804,10 +1883,11 @@ function rEvo(){
   const cotiza = r.tipo==='cotiza', cero = !!s.desdeCero && i0===0;
   let tot={ap:0,mk:0}, sinD=0, filas='';
   ms.forEach((m,i)=>{
+    if (di[i]) return;                 // las fotos diarias se dibujan, no se tabulan
     const hueco = r.huecos && r.huecos.includes(m);
     const a=hueco?null:ap[i], k=hueco?null:mk[i];
     if (i>0||cero){ if(a===null||k===null) sinD++; else {tot.ap+=a; tot.mk+=k;} }
-    filas += `<tr><td>${et(m)}</td><td>${eur0(sa[i])}</td>
+    filas += `<tr><td>${lab(i)}</td><td>${eur0(sa[i])}</td>
       <td class="${a===null?'na':''}">${a===null?(i===0?'·':'?'):(a>=0?'+':'')+eur0(a)}</td>
       <td class="${!cotiza?'na':k===null?'na':k>0?'pos':k<0?'neg':''}">${!cotiza?'·':k===null?(i===0?'·':'—'):(k>=0?'+':'')+eur0(k)}</td></tr>`;
   });
@@ -1824,7 +1904,7 @@ function rEvo(){
   $('eDos').innerHTML = `
     <div><div class="t">En este periodo</div>
       <div class="n ${cls(izq)}">${izq===undefined?'·':(izq>=0?'+':'')+eur0(izq)}${sinD&&cotiza?' +':''}</div>
-      <div class="p">${et(ms[0])} → ${et(ms[ms.length-1])}</div></div>
+      <div class="p">${lab(0)} → ${lab(ms.length-1)}</div></div>
     <div><div class="t">Desde el origen</div>
       <div class="n ${gan!==null?cls(gan):'na'}">${gan!==null?(gan>=0?'+':'')+eur0(gan):'—'}</div>
       <div class="p">${gan!==null && o.ap>0.005 ? (o.tir!==null && o.meses>=12
@@ -1832,7 +1912,7 @@ function rEvo(){
           : `desde ${o.desde||'el primer apunte'} · <b>${(gan/o.ap*100).toFixed(1)} %${o.meses?` en ${o.meses} meses`:''}</b>`)
         : 'no hay fecha de inicio conocida'}</div></div>`;
   $('ePie').innerHTML = eSel==='total'
-    ? `Esta cifra es <b>tu última foto</b> (${et(ms[ms.length-1])}). Hazte una en Fotos para
+    ? `Esta cifra es <b>tu última foto</b> (${lab(ms.length-1)}). Hazte una en Fotos para
        mover esta curva: aquí no valen los precios del momento, valen las fotos.`
     : esMano(eSel)
       ? `Esta acción se valora <b>a mano</b> (su valor lo tecleas en Fotos). La app la conoce desde
@@ -1840,6 +1920,10 @@ function rEvo(){
     : s.vivo
       ? `El último punto es de <b>hoy</b>: lo que valen ahora tus unidades, con los precios de la
          cabecera. Los meses anteriores son cierres de mes del histórico.`
+        + (di.some(Boolean) ? ` Los puntos pequeños entre el último cierre y hoy son <b>tus fotos</b>:
+         cada una guarda lo que valía esta rama ese día.`
+         : ` Para ver la semana y no solo el mes, hazte fotos en Fotos: cada una guarda lo que
+         vale cada rama ese día y aquí aparecen como puntos entre el último cierre y hoy.`)
       : '';
 }
 
@@ -1863,11 +1947,16 @@ function rFot(){
   const P = patrimonio();
   const ok = !P.parcial;
   $('fTotal').textContent = ok ? eur(P.total) : raya;
-  $('fDetalle').textContent = ok
-    ? 'igual que la pestaña Patrimonio: la misma función de cálculo'
-    : 'sin precio de cripto no se puede calcular ni fotografiar';
-  $('fHacer').disabled = !ok;
   const ult = S.fotos[S.fotos.length-1], dU = ult ? dias(ult.f) : null;
+  // la pregunta de siempre —«¿por qué hoy tengo 300 € más que ayer?»— se
+  // responde aquí: lo de ahora contra la última foto, rama a rama
+  const exHoy = ok && ult && ult.d ? explicar(ult.d, desgloseHoy(), Math.round(P.total)-ult.v) : null;
+  $('fDetalle').textContent = !ok ? 'sin precio de cripto no se puede calcular ni fotografiar'
+    : exHoy ? (ult.f===HOY && !exHoy.length ? 'la foto de hoy ya está hecha y no ha cambiado nada desde entonces'
+        : `desde la foto del ${ult.f}: ${(Math.round(P.total)-ult.v>=0?'+':'')+eur0(Math.round(P.total)-ult.v)}`
+              + (exHoy.length ? ' · ' + explicarTxt(exHoy, false) : ''))
+    : 'igual que la pestaña Patrimonio: la misma función de cálculo';
+  $('fHacer').disabled = !ok;
   $('fUlt').textContent = dU===null ? 'ninguna todavía'
     : dU>35 ? `⚠ última hace ${dU} días` : `última: hace ${dU} días`;
   // aviso de respaldo a los 30 días, y desde el principio si nunca se exportó
@@ -1892,10 +1981,13 @@ function rFot(){
     const quitar = x.hoja ? `<span style="flex:0 0 32px"></span>`
       : fotoDel===idx ? `<button class="x conf" data-fok="${idx}">¿quitar?</button>`
       : `<button class="x est" data-fdel="${idx}">✕</button>`;
+    // de dónde sale la diferencia: solo cuando las dos fotos llevan desglose
+    const ex = ant && d!==null ? explicar(ant.d, x.d, d) : null;
     return `<div class="ft${x.hoja?'':' nueva'}">
       <span class="fh">${x.f}<small>${x.hoja?'de la hoja':'foto tuya'}</small></span>
       <span class="eu num">${eur0(x.v)}</span>
-      <span class="d num ${d===null?'':d>=0?'up':'dn'}">${d===null?'·':(d>=0?'+':'')+eur0(d)}</span>${quitar}</div>`; }).join('')
+      <span class="d num ${d===null?'':d>=0?'up':'dn'}">${d===null?'·':(d>=0?'+':'')+eur0(d)}</span>${quitar}
+      ${ex ? `<span class="fx num">${explicarTxt(ex, true)}</span>` : ''}</div>`; }).join('')
   + (nPag>1 ? `<div class="fpag">
       <button data-fpag="1" ${fotPag>=nPag-1?'disabled':''}>‹ más antiguas</button>
       <span>${desde+1}–${Math.min(desde+PAG, todas.length)} de ${todas.length}</span>
@@ -1971,11 +2063,9 @@ document.addEventListener('click', e => {
     m += b.id==='mNext'?1:-1; if(m===0){m=12;y--;} if(m===13){m=1;y++;}
     ymAct = y+'-'+String(m).padStart(2,'0'); render(); return; }
   if (b.dataset.modo){ const m = mes();
-    if (!Object.values(m.ap || {}).some(x => x > 0.005)){
-      m.modo = b.dataset.modo;
-      aplicarMes();                     // re-reparte el mes con el modo nuevo
-      render();
-    } return; }
+    m.modo = b.dataset.modo;
+    aplicarMes();                     // re-reparte el mes con el modo nuevo; el bolsillo puede quedar en rojo
+    render(); return; }
   if (b.dataset.ap){ abierto = abierto===b.dataset.ap?null:b.dataset.ap; render();
     const i=$('apEu'); if(i){i.focus();i.select();} return; }
   if (b.dataset.ok){
@@ -2097,7 +2187,7 @@ document.addEventListener('click', e => {
   if (b.id==='bImport'){ $('fFile').click(); return; }
   if (b.id==='fHacer'){ const P=patrimonio(); if(P.parcial) return;
     Object.values(S.mano).forEach(m=>m.fecha=HOY);
-    S.fotos.push({f:HOY, v:Math.round(P.total), hoja:false});
+    S.fotos.push({f:HOY, v:Math.round(P.total), hoja:false, d:desgloseHoy()});
     render(); return; }
   if (b.dataset.fpag){ fotPag += +b.dataset.fpag; rFot(); return; }
   // vender una acción a mano: primer toque pregunta por cuánto, segundo apunta
@@ -2214,10 +2304,14 @@ window.__checks = function(){
   const s=S.config.cats.reduce((a,c)=>a+c.pct,0);
   ok('reparto suma 100', Math.abs(s-100)<0.051, s.toFixed(2));
   // 6 · cobrar tiene que llegar a todas partes: lo aplicado del mes está dentro
-  //     de los bolsillos, y por tanto dentro del patrimonio
+  //     de los bolsillos, y por tanto dentro del patrimonio. Desde el 15/09/2026
+  //     un bolsillo PUEDE estar en negativo, pero solo porque se aportó de más
+  //     (compra a mitad de mes, cambio de modo después): si nunca se aportó a
+  //     esa categoría y aun así está en rojo, el dinero se perdió por el camino.
   const ap = Object.values(mes().aplicado || {}).reduce((a,b)=>a+b,0);
+  const aportadoAlgunaVez = k => Object.values(S.meses).some(x => (x.ap||{})[k] > 0.005);
   const enComp = Object.entries(mes().aplicado || {}).every(([k,v]) =>
-    v <= 0 || (S.cuentaTR.comp[k] ?? 0) >= -0.005);
+    v <= 0 || (S.cuentaTR.comp[k] ?? 0) >= -0.005 || aportadoAlgunaVez(k));
   ok('lo cobrado está en los bolsillos', enComp, eur(ap)+' aplicados este mes');
   // 7 · lo pendiente de cada categoría ES su bolsillo. Si alguna vez difieren,
   //     algo se está restando dos veces (pasó el 06/08/2026 al aportar).
