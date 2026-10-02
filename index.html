@@ -546,6 +546,7 @@ let PX = { world:{p:124.72,f:'2026-07-28',fuente:'respaldo'},
            oroU:{p:68.70,f:'2026-07-28',fuente:'respaldo'} };
 const ISIN = { world:'IE00B4L5Y983', nasdaq:'IE00B53SZB19', oroU:'IE00B4ND3602' };
 let vivos = null;                                       // btc, eth, steth en vivo
+let criptoRespaldo = null;                              // último cierre de precios.json
 
 // La serie histórica y los bloques de análisis TAMBIÉN son datos personales:
 // viajan en el import, no en la app. Sin ellos la app funciona, solo que
@@ -617,8 +618,9 @@ const mes = () => { if(!S.meses[ymAct]) S.meses[ymAct]={nomina:null,fijos:700,ex
    cripto si no hay precio: nunca un cero que parezca un dato. */
 function precioDe(k){
   if (PX[k]) return PX[k].p;
-  if (!vivos) return null;
-  return {btc:vivos.btc, eth:vivos.eth, steth:vivos.steth}[k] ?? null;
+  const cripto = vivos || criptoRespaldo;
+  if (!cripto) return null;
+  return {btc:cripto.btc, eth:cripto.eth, steth:cripto.steth}[k] ?? null;
 }
 function patrimonio(){
   const r = { liquido:S.cuentaTR.saldo, planos:0, posiciones:0, mano:0, sinPrecio:[], total:null };
@@ -2349,6 +2351,24 @@ fetch('precios.json')
       if (e && e.estado==='ok' && isFinite(e.precio) && e.precio > 0)
         PX[k] = {p:e.precio, f:e.fecha, fuente:'precios.json'};
     }
+    const clavesCripto = {btc:'act_btc', eth:'act_eth', steth:'act_steth'};
+    const respaldo = {};
+    let fechaCripto = null;
+    for (const [k, id] of Object.entries(clavesCripto)){
+      const e = j.precios && j.precios[id];
+      if (e && (e.estado==='ok' || e.estado==='stale') && isFinite(e.precio) && e.precio > 0){
+        respaldo[k] = e.precio;
+        if (!fechaCripto || (e.fecha && e.fecha > fechaCripto)) fechaCripto = e.fecha;
+      }
+    }
+    if (isFinite(respaldo.btc) && respaldo.btc > 0){
+      criptoRespaldo = respaldo;
+      criptoRespaldo.fecha = fechaCripto;
+      if (!vivos){
+        const fecha = fechaCripto ? fechaCripto.split('-').reverse().join('/') : 'último cierre';
+        $('uPrecio').innerHTML=`Cripto ${fecha} · BTC <b>${eur0(respaldo.btc)}</b>`;
+      }
+    }
     // la inflación del INE, bajada por el workflow: pisa los valores de arranque
     if (j.ipc && j.ipc.anual){
       Object.entries(j.ipc.anual).forEach(([y,v]) => { if (isFinite(v)) IPC[y] = v; });
@@ -2357,12 +2377,30 @@ fetch('precios.json')
     render();
   })
   .catch(()=>{});
-fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,staked-ether&vs_currencies=eur,usd')
-  .then(r=>r.json())
-  .then(d=>{ vivos={btc:d.bitcoin.eur, eth:d.ethereum.eur, steth:d['staked-ether'].eur};
-    $('uPrecio').innerHTML=`Cripto en vivo · BTC <b>$${d.bitcoin.usd.toLocaleString('en-US',{maximumFractionDigits:0})}</b>`;
-    render(); })
-  .catch(()=>{ $('uPrecio').textContent='Sin conexión · cripto sin precio'; render(); });
+const URL_CRIPTO = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,staked-ether&vs_currencies=eur,usd';
+function refrescarCripto(){
+  return fetch(URL_CRIPTO, {cache:'no-store'})
+    .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP '+r.status)))
+    .then(d => {
+      const btc=d.bitcoin&&d.bitcoin.eur, eth=d.ethereum&&d.ethereum.eur;
+      const steth=d['staked-ether']&&d['staked-ether'].eur, usd=d.bitcoin&&d.bitcoin.usd;
+      if (![btc,eth,steth,usd].every(x => isFinite(x) && x > 0)) throw new Error('precio inválido');
+      vivos={btc,eth,steth};
+      $('uPrecio').innerHTML=`Cripto en vivo · BTC <b>$${usd.toLocaleString('en-US',{maximumFractionDigits:0})}</b>`;
+      render();
+    })
+    .catch(()=>{
+      vivos=null;
+      if (criptoRespaldo){
+        const fecha = criptoRespaldo.fecha ? criptoRespaldo.fecha.split('-').reverse().join('/') : 'último cierre';
+        $('uPrecio').innerHTML=`Cripto ${fecha} · BTC <b>${eur0(criptoRespaldo.btc)}</b>`;
+      } else $('uPrecio').textContent='Sin conexión · cripto sin precio';
+      render();
+    });
+}
+refrescarCripto();
+document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refrescarCripto(); });
+setInterval(()=>{ if (!document.hidden) refrescarCripto(); }, 5*60*1000);
 render();
 </script>
 </body>

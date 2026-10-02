@@ -116,7 +116,9 @@ function construir(opciones) {
   var deYahoo = esObjeto(descargas.yahoo) ? descargas.yahoo : {};
   var deCoingecko = esObjeto(descargas.coingecko) ? descargas.coingecko : {};
 
-  // --- bloque `precios`: vivo, por ISIN. La cripto no entra: la app la pide ella misma. ---
+  // --- bloque `precios`: último precio disponible. Los ETF van por ISIN y la cripto por
+  // activoId. La app intenta CoinGecko en vivo, pero necesita este respaldo del mismo origen:
+  // algunos navegadores/PWA bloquean o limitan la petición directa de terceros.
   var precios = {};
   var cierreDe = null;
 
@@ -168,6 +170,50 @@ function construir(opciones) {
         estado: 'error', motivo: motivo, fuente: null
       };
       avisos.push({ codigo: 'sin_cobertura', activoId: conf.activoId, mensaje: isin + ': ' + motivo });
+    }
+  });
+
+  Object.keys(t.cripto).forEach(function (activoId) {
+    var conf = t.cripto[activoId];
+    var d = deCoingecko[conf.coingeckoId];
+    var cierres = (esObjeto(d) && d.ok === true) ? cierresValidos(d.cierres) : [];
+
+    if (cierres.length > 0) {
+      var ult = cierres[cierres.length - 1];
+      var entrada = {
+        simbolo: conf.coingeckoId,
+        nombre: conf.nombre,
+        precio: redondearPrecio(ult.cierre),
+        moneda: 'EUR',
+        fecha: ult.fecha,
+        estado: 'ok',
+        fuente: 'coingecko'
+      };
+      if (cierres.length > 1) {
+        entrada.cierreAnterior = redondearPrecio(cierres[cierres.length - 2].cierre);
+        if (precioValido(entrada.cierreAnterior)) {
+          entrada.variacionPct = redondear2((entrada.precio / entrada.cierreAnterior - 1) * 100);
+        }
+      }
+      precios[activoId] = entrada;
+      if (cierreDe == null || ult.fecha > cierreDe) cierreDe = ult.fecha;
+      return;
+    }
+
+    var motivo = (esObjeto(d) && typeof d.motivo === 'string') ? d.motivo : 'sin_datos';
+    var anterior = (previo && esObjeto(previo.precios)) ? previo.precios[activoId] : null;
+    if (esObjeto(anterior) && precioValido(anterior.precio)) {
+      var conservada = copia(anterior);
+      conservada.estado = 'stale';
+      conservada.motivo = 'fuente no respondió; se conserva último precio bueno';
+      precios[activoId] = conservada;
+      avisos.push({ codigo: 'fuente_caida', activoId: activoId, mensaje: activoId + ': ' + motivo });
+    } else {
+      precios[activoId] = {
+        simbolo: conf.coingeckoId, nombre: conf.nombre, precio: null, moneda: 'EUR', fecha: null,
+        estado: 'error', motivo: motivo, fuente: 'coingecko'
+      };
+      avisos.push({ codigo: 'sin_cobertura', activoId: activoId, mensaje: activoId + ': ' + motivo });
     }
   });
 
