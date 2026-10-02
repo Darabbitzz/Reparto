@@ -2343,7 +2343,7 @@ window.__checks = function(){
 $('uHoy').textContent = HOY.split('-').reverse().join('/');
 // ETFs desde precios.json (lo regenera Actions a diario). Si falla, quedan
 // los precios de compra y el chip de frescura lo dice: degradar, no callar.
-fetch('precios.json')
+fetch('precios.json?v=' + Date.now(), {cache:'no-store'})
   .then(r => r.ok ? r.json() : Promise.reject())
   .then(j => {
     for (const [k, isin] of Object.entries(ISIN)){
@@ -2401,6 +2401,9 @@ function refrescarCripto(){
 refrescarCripto();
 document.addEventListener('visibilitychange', ()=>{ if (!document.hidden) refrescarCripto(); });
 setInterval(()=>{ if (!document.hidden) refrescarCripto(); }, 5*60*1000);
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+}
 render();
 </script>
 </body>
