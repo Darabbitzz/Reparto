@@ -1,79 +1,79 @@
 {
   "schema": 1,
-  "generado": "2026-10-06T11:58:26Z",
-  "cierreDe": "2026-10-06",
+  "generado": "2026-10-07T11:43:12Z",
+  "cierreDe": "2026-10-07",
   "monedaBase": "EUR",
   "fx": {
-    "USD": 0.8875,
-    "GBP": 1.1778,
-    "fecha": "2026-10-06"
+    "USD": 0.8943,
+    "GBP": 1.1811,
+    "fecha": "2026-10-07"
   },
   "precios": {
     "IE00B4L5Y983": {
       "simbolo": "SWDA.MI",
       "nombre": "iShares Core MSCI World UCITS ETF",
-      "precio": 131.48,
+      "precio": 131.67,
       "moneda": "EUR",
-      "fecha": "2026-10-06",
+      "fecha": "2026-10-07",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 130.04,
-      "variacionPct": 1.11
+      "cierreAnterior": 131.18,
+      "variacionPct": 0.37
     },
     "IE00B53SZB19": {
       "simbolo": "SXRV.DE",
       "nombre": "iShares NASDAQ 100 UCITS ETF (Acc)",
-      "precio": 1594,
+      "precio": 1592.8,
       "moneda": "EUR",
-      "fecha": "2026-10-06",
+      "fecha": "2026-10-07",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 1572.6,
-      "variacionPct": 1.36
+      "cierreAnterior": 1587.6,
+      "variacionPct": 0.33
     },
     "IE00B4ND3602": {
       "simbolo": "PPFB.DE",
       "nombre": "iShares Physical Gold ETC",
-      "precio": 71.78,
+      "precio": 71.43,
       "moneda": "EUR",
-      "fecha": "2026-10-06",
+      "fecha": "2026-10-07",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 71.39,
-      "variacionPct": 0.55
+      "cierreAnterior": 71.6,
+      "variacionPct": -0.24
     },
     "act_btc": {
       "simbolo": "bitcoin",
       "nombre": "Bitcoin",
-      "precio": 76880.75,
+      "precio": 74284.93,
       "moneda": "EUR",
-      "fecha": "2026-10-06",
+      "fecha": "2026-10-07",
       "estado": "ok",
       "fuente": "coingecko",
-      "cierreAnterior": 76458.73,
-      "variacionPct": 0.55
+      "cierreAnterior": 76015.8,
+      "variacionPct": -2.28
     },
     "act_eth": {
       "simbolo": "ethereum",
       "nombre": "Ethereum",
-      "precio": 2419.74,
+      "precio": 2286.58,
       "moneda": "EUR",
-      "fecha": "2026-10-06",
+      "fecha": "2026-10-07",
       "estado": "ok",
       "fuente": "coingecko",
-      "cierreAnterior": 2416.15,
-      "variacionPct": 0.15
+      "cierreAnterior": 2396.86,
+      "variacionPct": -4.6
     },
     "act_steth": {
       "simbolo": "staked-ether",
       "nombre": "Lido stETH",
-      "precio": 2419.09,
+      "precio": 2285.91,
       "moneda": "EUR",
-      "fecha": "2026-10-06",
+      "fecha": "2026-10-07",
       "estado": "ok",
       "fuente": "coingecko",
-      "cierreAnterior": 2415.65,
-      "variacionPct": 0.14
+      "cierreAnterior": 2396.57,
+      "variacionPct": -4.62
     }
   },
   "historico": {
