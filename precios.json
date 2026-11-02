@@ -1,79 +1,79 @@
 {
   "schema": 1,
-  "generado": "2026-10-31T10:52:24Z",
-  "cierreDe": "2026-10-31",
+  "generado": "2026-11-02T13:24:20Z",
+  "cierreDe": "2026-11-02",
   "monedaBase": "EUR",
   "fx": {
-    "USD": 0.89423,
-    "GBP": 1.19629,
-    "fecha": "2026-10-30"
+    "USD": 0.8914,
+    "GBP": 1.196,
+    "fecha": "2026-11-02"
   },
   "precios": {
     "IE00B4L5Y983": {
       "simbolo": "SWDA.MI",
       "nombre": "iShares Core MSCI World UCITS ETF",
-      "precio": 129.69,
+      "precio": 129.27,
       "moneda": "EUR",
-      "fecha": "2026-10-30",
+      "fecha": "2026-11-02",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 131.48,
-      "variacionPct": -1.36
+      "cierreAnterior": 129.69,
+      "variacionPct": -0.32
     },
     "IE00B53SZB19": {
       "simbolo": "SXRV.DE",
       "nombre": "iShares NASDAQ 100 UCITS ETF (Acc)",
-      "precio": 1465.4,
+      "precio": 1463.8,
       "moneda": "EUR",
-      "fecha": "2026-10-30",
+      "fecha": "2026-11-02",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 1513.8,
-      "variacionPct": -3.2
+      "cierreAnterior": 1465.4,
+      "variacionPct": -0.11
     },
     "IE00B4ND3602": {
       "simbolo": "PPFB.DE",
       "nombre": "iShares Physical Gold ETC",
-      "precio": 67.79,
+      "precio": 67.42,
       "moneda": "EUR",
-      "fecha": "2026-10-30",
+      "fecha": "2026-11-02",
       "estado": "ok",
       "fuente": "yahoo",
-      "cierreAnterior": 69.71,
-      "variacionPct": -2.75
+      "cierreAnterior": 67.79,
+      "variacionPct": -0.55
     },
     "act_btc": {
       "simbolo": "bitcoin",
       "nombre": "Bitcoin",
-      "precio": 69047.14,
+      "precio": 69504.78,
       "moneda": "EUR",
-      "fecha": "2026-10-31",
+      "fecha": "2026-11-02",
       "estado": "ok",
       "fuente": "coingecko",
-      "cierreAnterior": 68921.6,
-      "variacionPct": 0.18
+      "cierreAnterior": 70177.12,
+      "variacionPct": -0.96
     },
     "act_eth": {
       "simbolo": "ethereum",
       "nombre": "Ethereum",
-      "precio": 2001.92,
+      "precio": 2040.82,
       "moneda": "EUR",
-      "fecha": "2026-10-31",
+      "fecha": "2026-11-02",
       "estado": "ok",
       "fuente": "coingecko",
-      "cierreAnterior": 2001.43,
-      "variacionPct": 0.02
+      "cierreAnterior": 2038.19,
+      "variacionPct": 0.13
     },
     "act_steth": {
       "simbolo": "staked-ether",
       "nombre": "Lido stETH",
-      "precio": 2001.46,
+      "precio": 2041.18,
       "moneda": "EUR",
-      "fecha": "2026-10-31",
+      "fecha": "2026-11-02",
       "estado": "ok",
       "fuente": "coingecko",
-      "cierreAnterior": 2000.24,
-      "variacionPct": 0.06
+      "cierreAnterior": 2037.19,
+      "variacionPct": 0.2
     }
   },
   "historico": {
@@ -106,7 +106,8 @@
       "2026-05": 123.43,
       "2026-06": 125.09,
       "2026-08": 126.78,
-      "2026-09": 128.69
+      "2026-09": 128.69,
+      "2026-10": 129.69
     },
     "act_nasdaq": {
       "2024-04": 941.8,
@@ -137,7 +138,8 @@
       "2026-05": 1492,
       "2026-06": 1515.4,
       "2026-08": 1451,
-      "2026-09": 1537.4
+      "2026-09": 1537.4,
+      "2026-10": 1465.4
     },
     "act_oro": {
       "2024-04": 41.8,
@@ -168,7 +170,8 @@
       "2026-05": 76.06,
       "2026-06": 68.46,
       "2026-08": 73.97,
-      "2026-09": 71.14
+      "2026-09": 71.14,
+      "2026-10": 67.79
     },
     "act_btc": {
       "2025-07": 103129.14,
@@ -184,7 +187,8 @@
       "2026-05": 63365.72,
       "2026-06": 52704.11,
       "2026-08": 67011.13,
-      "2026-09": 73753.17
+      "2026-09": 73753.17,
+      "2026-10": 68967.91
     },
     "act_eth": {
       "2025-07": 3332.42,
@@ -200,7 +204,8 @@
       "2026-05": 1735.35,
       "2026-06": 1410.43,
       "2026-08": 2084.97,
-      "2026-09": 2360.9
+      "2026-09": 2360.9,
+      "2026-10": 2001.43
     },
     "act_steth": {
       "2025-07": 3330.04,
@@ -216,7 +221,8 @@
       "2026-05": 1734.79,
       "2026-06": 1404.52,
       "2026-08": 2085.95,
-      "2026-09": 2360.25
+      "2026-09": 2360.25,
+      "2026-10": 2000.24
     }
   },
   "ipc": {
