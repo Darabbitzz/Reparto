@@ -637,28 +637,29 @@ function patrimonio(){
                - Object.values(S.planos).reduce((a,b)=>a+b,0)*0; // planos ya salieron de la cuenta
   return r;
 }
-// la bolsa de riesgo del mes: todo lo invertible menos renta fija y yolo.
-// En porcentual el plan sale de renta variable; en autobalance, de la bolsa.
+// de dónde sale el plan de pensiones. En porcentual, de renta variable; en
+// autobalance, de todo lo invertible del mes (renta fija y yolo incluidos
+// desde el 17/11/2026: antes conservaban su % fijo y no se equilibraban).
 function poolRiesgo(inv, modo){
   return modo==='auto'
-    ? inv*S.config.cats.filter(c=>c.id!=='rf'&&c.id!=='yolo').reduce((s,c)=>s+c.pct,0)/100
+    ? inv
     : inv*S.config.cats.find(c=>c.id==='rv').pct/100;
 }
 // asignación del mes por categoría (euros), desde el reparto.
 // Dos modos POR MES (m.modo): 'pct' = porcentajes fijos de siempre;
-// 'auto' = renta fija, yolo y plan conservan lo suyo y el resto de la bolsa
-// se reparte por hueco contra el reparto sin renta fija (mismo algoritmo que la
-// tarjeta «¿A dónde va lo siguiente?»). Decidido el 08/08/2026.
+// 'auto' = el plan de pensiones va primero y TODO lo demás (renta fija y yolo
+// incluidos) se reparte por hueco contra el reparto completo de la nómina.
+// Decidido el 08/08/2026; renta fija y yolo entran el 17/11/2026, pedido por
+// el usuario (antes conservaban su % fijo).
 function asigMes(c){
   const m = mes();
   if (m.nomina === null) return null;
   const restante = Math.max(m.nomina + (m.extra??0) - (m.fijos??0), 0);
   const inv = restante*S.config.pInv/100;
-  if ((m.modo||'pct')==='auto' && c.id!=='rf' && c.id!=='yolo'){
+  if ((m.modo||'pct')==='auto'){
     const P = poolRiesgo(inv, 'auto');
     const pens = Math.min(S.config.pens, P);
-    const r = repartirHueco(P - pens, pens);
-    return c.id==='liq' ? r.liqY : r[c.id];
+    return repartirHuecoTodo(P - pens, pens)[c.id] ?? 0;
   }
   const e = inv*c.pct/100;
   return c.id==='rv' ? Math.max(e - S.config.pens, 0) : e;
@@ -732,13 +733,13 @@ function rMes(){
     `<button data-modo="pct" class="${modo==='pct'?'on':''}">% fijos</button>
      <button data-modo="auto" class="${modo==='auto'?'on':''}">Autobalance</button>`
     + (enRojo.length ? `<span class="fij">Has metido más de lo asignado en ${enRojo.map(c=>c.n).join(', ')}: el exceso se descuenta del mes que viene.</span>`
-       : modo==='auto' ? `<span class="fij">Renta fija, plan y yolo conservan lo suyo; el resto va a lo más lejos del reparto sin renta fija.</span>` : '');
+       : modo==='auto' ? `<span class="fij">El plan va primero; el resto, renta fija y yolo incluidos, va a lo que más lejos está del reparto.</span>` : '');
   let suma = 0;
   $('mCats').innerHTML = S.config.cats.map(c => { suma += c.pct;
     const e = asigMes(c);
     let sub = c.sub || '';
     if (c.id==='rv' && hay) sub = 'tras descontar '+eur(Math.min(S.config.pens, poolRiesgo(inv, modo)))+' del plan de pensiones';
-    const esAuto = modo==='auto' && c.id!=='rf' && c.id!=='yolo';
+    const esAuto = modo==='auto';
     const celda = esAuto
       ? `<span class="pct"><span style="font-size:10px;font-weight:700;color:var(--mute);text-transform:uppercase">auto</span></span>`
       : `<span class="pct"><input type="text" inputmode="decimal" value="${c.pct}" data-pct="${c.id}"><span>%</span></span>`;
@@ -1086,6 +1087,24 @@ function repartirHueco(X, rvForzado){
   ks.forEach(o => { d[o.id] = Math.max(pctRiesgo(o.id)/100*T - v[o.id], 0); D += d[o.id]; });
   const r = {}; ks.forEach(o => r[o.id] = D>0 ? X*d[o.id]/D : 0);
   return r;                                   // {rv, cri, liqY, oro}
+}
+// el autobalance del mes: como repartirHueco pero contra el reparto COMPLETO
+// (las seis categorías, renta fija y yolo cada una con lo suyo). Si nada
+// tiene hueco, se reparte por los porcentajes para que no se pierda un euro.
+function euCatMes(id){
+  if (id==='liq')  return S.cuentaTR.comp.liq + S.planos.liq;
+  if (id==='yolo') return S.cuentaTR.comp.yolo + S.planos.yolo + manoYolo();
+  return euCat(id);
+}
+function repartirHuecoTodo(X, rvForzado){
+  const cs = S.config.cats, tp = cs.reduce((s,c)=>s+c.pct,0) || 1;
+  const v = {}; cs.forEach(c => v[c.id] = euCatMes(c.id));
+  v.rv += rvForzado || 0;
+  const T = cs.reduce((s,c)=>s+v[c.id],0) + X;
+  let D = 0; const d = {};
+  cs.forEach(c => { d[c.id] = Math.max(c.pct/tp*T - v[c.id], 0); D += d[c.id]; });
+  const r = {}; cs.forEach(c => r[c.id] = D>0 ? X*d[c.id]/D : X*c.pct/tp);
+  return r;                                   // {rf, rv, cri, oro, liq, yolo}
 }
 function rTarta(){
   const it = OBJ.map(o => ({...o, p:soloInv?(o.riesgo?pctRiesgo(o.id):0):pctObj(o.id), e:euCat(o.id),
@@ -2327,13 +2346,13 @@ window.__checks = function(){
   ok('TR: componentes = efectivo = saldo, y efectivo+posiciones = todo',
      Math.abs(tr.reduce((a,b)=>a+b,0)-trEf)<0.03 && Math.abs(trEf-S.cuentaTR.saldo)<0.005
      && Math.abs(trEf+trPos-trTodo)<0.03, eur(trEf));
-  // 9 · en modo autobalance, lo asignado al riesgo suma la bolsa exacta
+  // 9 · en modo autobalance, lo asignado (las seis) suma lo invertible menos el plan
   const m9 = mes();
   if ((m9.modo||'pct')==='auto' && m9.nomina !== null){
     const inv9 = Math.max(m9.nomina + (m9.extra??0) - (m9.fijos??0), 0)*S.config.pInv/100;
     const P9 = poolRiesgo(inv9,'auto'), pens9 = Math.min(S.config.pens, P9);
-    const rep9 = ['rv','cri','oro','liq'].reduce((s,id)=>s+(asigMes(S.config.cats.find(c=>c.id===id))||0),0);
-    ok('autobalance: el riesgo suma la bolsa menos el plan', Math.abs(rep9-(P9-pens9))<0.03,
+    const rep9 = S.config.cats.reduce((s,c)=>s+(asigMes(c)||0),0);
+    ok('autobalance: todo suma lo invertible menos el plan', Math.abs(rep9-(P9-pens9))<0.03,
        eur(rep9)+' de '+eur(P9-pens9));
   }
   return out.join('\n');
