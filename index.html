@@ -582,6 +582,11 @@ function migrar(s){
   // las acciones a mano creadas antes de que existiera el coste: lo que valen hoy
   // es la mejor estimación de lo que costaron
   Object.values(s.mano||{}).forEach(m => { if ((m.yolo||m.rv) && m.coste === undefined) m.coste = m.eur; });
+  // los % fijos pasan a ser DE CADA MES (27/11/2026): eran globales y cambiar
+  // uno reescribía el reparto de todos los meses. Los meses que ya existían se
+  // quedan con el reparto vigente al migrar.
+  const glob = {}; (s.config.cats||[]).forEach(c => glob[c.id] = c.pct);
+  Object.values(s.meses||{}).forEach(m => { if (!m.pct) m.pct = {...glob}; });
   return s;
 }
 let S;
@@ -611,7 +616,15 @@ const raya = '—';
 const MESN=['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
 let ymAct = HOY.slice(0,7);
 const mes = () => { if(!S.meses[ymAct]) S.meses[ymAct]={nomina:null,fijos:700,extra:null,intTR:null,sobre:null,ap:{}};
-                    return S.meses[ymAct]; };
+                    const m = S.meses[ymAct]; if (!m.pct) m.pct = pctHeredado(ymAct);
+                    return m; };
+// los % de un mes nuevo: los del último mes anterior que tenga; si no, el global
+function pctHeredado(ym){
+  const prev = Object.keys(S.meses).filter(k => k < ym && S.meses[k].pct).sort().pop();
+  const r = {}; S.config.cats.forEach(c => r[c.id] = prev && S.meses[prev].pct[c.id] !== undefined ? S.meses[prev].pct[c.id] : c.pct);
+  return r;
+}
+const pctDe = (c, m) => { const p = (m || mes()).pct; return p && p[c.id] !== undefined ? p[c.id] : c.pct; };
 
 /* ════════════ LA ÚNICA FUNCIÓN DE PATRIMONIO ════════════
    La usan Patrimonio, Fotos y las comprobaciones. Devuelve null en
@@ -643,7 +656,7 @@ function patrimonio(){
 function poolRiesgo(inv, modo){
   return modo==='auto'
     ? inv
-    : inv*S.config.cats.find(c=>c.id==='rv').pct/100;
+    : inv*pctDe(S.config.cats.find(c=>c.id==='rv'))/100;
 }
 // asignación del mes por categoría (euros), desde el reparto.
 // Dos modos POR MES (m.modo): 'pct' = porcentajes fijos de siempre;
@@ -661,7 +674,7 @@ function asigMes(c){
     const pens = Math.min(S.config.pens, P);
     return repartirHuecoTodo(P - pens, pens)[c.id] ?? 0;
   }
-  const e = inv*c.pct/100;
+  const e = inv*pctDe(c, m)/100;
   return c.id==='rv' ? Math.max(e - S.config.pens, 0) : e;
 }
 
@@ -735,14 +748,14 @@ function rMes(){
     + (enRojo.length ? `<span class="fij">Has metido más de lo asignado en ${enRojo.map(c=>c.n).join(', ')}: el exceso se descuenta del mes que viene.</span>`
        : modo==='auto' ? `<span class="fij">El plan va primero; el resto, renta fija y yolo incluidos, va a lo que más lejos está del reparto.</span>` : '');
   let suma = 0;
-  $('mCats').innerHTML = S.config.cats.map(c => { suma += c.pct;
+  $('mCats').innerHTML = S.config.cats.map(c => { suma += pctDe(c, m);
     const e = asigMes(c);
     let sub = c.sub || '';
     if (c.id==='rv' && hay) sub = 'tras descontar '+eur(Math.min(S.config.pens, poolRiesgo(inv, modo)))+' del plan de pensiones';
     const esAuto = modo==='auto';
     const celda = esAuto
       ? `<span class="pct"><span style="font-size:10px;font-weight:700;color:var(--mute);text-transform:uppercase">auto</span></span>`
-      : `<span class="pct"><input type="text" inputmode="decimal" value="${c.pct}" data-pct="${c.id}"><span>%</span></span>`;
+      : `<span class="pct"><input type="text" inputmode="decimal" value="${pctDe(c, m)}" data-pct="${c.id}"><span>%</span></span>`;
     return `<div class="row"><span class="nm">${c.n}${sub?`<small>${sub}</small>`:''}</span>
       ${celda}
       <span class="eu num">${e===null?raya:eur(e)}</span></div>`; }).join('');
@@ -2056,25 +2069,29 @@ function renderPronto(){ clearTimeout(tRender); tRender = setTimeout(render, 350
 // van erosionando el reparto. La foto se suelta al salir de la casilla.
 let fotoPct = null;               // {id, pct:{id:valor}}
 function reajustarPct(id, nuevo){
-  const cs = S.config.cats;
-  if (!fotoPct || fotoPct.id !== id){
-    fotoPct = {id, pct:{}}; cs.forEach(c => fotoPct.pct[c.id] = c.pct);
+  const cs = S.config.cats, m = mes(), P = m.pct;
+  if (!fotoPct || fotoPct.id !== id || fotoPct.ym !== ymAct){
+    fotoPct = {id, ym:ymAct, pct:{...P}};
   }
   const v = Math.min(Math.max(isFinite(nuevo) ? nuevo : 0, 0), 100);
   const otros = cs.filter(c => c.id !== id);
-  const base = otros.reduce((s,c) => s + fotoPct.pct[c.id], 0);
+  const base = otros.reduce((s,c) => s + (fotoPct.pct[c.id] ?? 0), 0);
   const resto = 100 - v;
   otros.forEach(c => {
-    const p = base > 0 ? fotoPct.pct[c.id]/base*resto : resto/otros.length;
-    c.pct = Math.round(p*100)/100;
+    const p = base > 0 ? (fotoPct.pct[c.id] ?? 0)/base*resto : resto/otros.length;
+    P[c.id] = Math.round(p*100)/100;
   });
-  cs.find(c => c.id === id).pct = v;
+  P[id] = v;
   // el redondeo a centésimas deja migas: van a la mayor de las otras
-  const miga = Math.round((100 - cs.reduce((s,c) => s + c.pct, 0))*100)/100;
+  const miga = Math.round((100 - cs.reduce((s,c) => s + P[c.id], 0))*100)/100;
   if (miga && otros.length){
-    const g = otros.reduce((a,b) => b.pct > a.pct ? b : a);
-    g.pct = Math.round((g.pct + miga)*100)/100;
+    const g = otros.reduce((a,b) => P[b.id] > P[a.id] ? b : a);
+    P[g.id] = Math.round((P[g.id] + miga)*100)/100;
   }
+  // solo el mes más reciente marca el reparto global (plantilla de los meses
+  // nuevos y objetivo del autobalance); tocar un mes pasado no lo mueve
+  const ultimo = Object.keys(S.meses).sort().pop();
+  if (ymAct >= ultimo) cs.forEach(c => c.pct = P[c.id]);
 }
 document.addEventListener('focusout', e => {
   if (!e.target.dataset || !e.target.dataset.pct) return;
@@ -2089,7 +2106,9 @@ document.addEventListener('focusout', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.pct){ const c=S.config.cats.find(x=>x.id===t.dataset.pct);
-    if(c){ reajustarPct(c.id, dec(t.value)); renderPronto(); } return; }
+    if(c){ reajustarPct(c.id, dec(t.value));
+      aplicarMes();                     // los bolsillos del mes siguen al reparto nuevo
+      renderPronto(); } return; }
   if (t.dataset.mano){ const v=dec(t.value);
     if(isFinite(v)&&v>=0){ S.mano[t.dataset.mano].eur=v; renderPronto(); } return; }
   if (t.dataset.vcoste){ const v=S.mov.find(x=>x.id==t.dataset.vcoste), n=dec(t.value);
@@ -2359,7 +2378,7 @@ window.__checks = function(){
   ok('árbol suma el total', Math.abs(arbol.reduce((a,b)=>a+b,0)+sinAs-P.total)<0.03,
      eur(arbol.reduce((a,b)=>a+b,0)+sinAs)+' vs '+eur(P.total));
   // 5 · los % del reparto suman 100
-  const s=S.config.cats.reduce((a,c)=>a+c.pct,0);
+  const s=S.config.cats.reduce((a,c)=>a+pctDe(c),0);
   ok('reparto suma 100', Math.abs(s-100)<0.051, s.toFixed(2));
   // 6 · cobrar tiene que llegar a todas partes: lo aplicado del mes está dentro
   //     de los bolsillos, y por tanto dentro del patrimonio. Desde el 15/09/2026
