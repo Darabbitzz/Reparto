@@ -2479,6 +2479,26 @@ setInterval(()=>{ if (!document.hidden) refrescarCripto(); }, 5*60*1000);
 if ('serviceWorker' in navigator){
   window.addEventListener('load', ()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
 }
+// REPARACIÓN 27/11/2026 (una sola vez): la versión de esa mañana reescribió los
+// % de todos los meses al tocar uno. Se devuelve a TODOS los meses y al global
+// el reparto que había (65 · 17,5 · 8,85 · 4 · 3,25 · 1,4, confirmado en la
+// copia de datos del 17/11). Los meses cuyos bolsillos se llegaron a
+// recalcular con los % malos se vuelven a aplicar con los buenos.
+(function repararPct(){
+  if (S.reparadoPct27) return;
+  const BUENOS = {rf:65, rv:17.5, cri:8.85, oro:4, liq:3.25, yolo:1.4};
+  const igual = p => p && Object.keys(BUENOS).every(k => Math.abs((p[k] ?? -1) - BUENOS[k]) < 1e-9);
+  const yaVisible = ymAct, tocados = [];
+  Object.keys(S.meses).forEach(ym => {
+    const m = S.meses[ym]; const malo = m.pct && !igual(m.pct);
+    m.pct = {...BUENOS};
+    if (malo && m.nomina !== null) tocados.push(ym);
+  });
+  S.config.cats.forEach(c => { if (BUENOS[c.id] !== undefined) c.pct = BUENOS[c.id]; });
+  tocados.forEach(ym => { ymAct = ym; aplicarMes(); });
+  ymAct = yaVisible;
+  S.reparadoPct27 = true; save();
+})();
 render();
 </script>
 </body>
