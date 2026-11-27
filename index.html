@@ -2048,11 +2048,48 @@ function render(){
 let tRender = null;
 function renderPronto(){ clearTimeout(tRender); tRender = setTimeout(render, 350); }
 
+/* ════════════ % FIJOS QUE SE REAJUSTAN SOLOS ════════════ */
+// Al cambiar un porcentaje, los demás absorben la diferencia en proporción a lo
+// que pesaban, para que siempre sumen 100 (pedido el 27/11/2026: antes solo
+// salía el aviso). Se calcula SIEMPRE desde la foto tomada al empezar a
+// teclear en esa casilla: los valores a medio escribir («6» camino de «65») no
+// van erosionando el reparto. La foto se suelta al salir de la casilla.
+let fotoPct = null;               // {id, pct:{id:valor}}
+function reajustarPct(id, nuevo){
+  const cs = S.config.cats;
+  if (!fotoPct || fotoPct.id !== id){
+    fotoPct = {id, pct:{}}; cs.forEach(c => fotoPct.pct[c.id] = c.pct);
+  }
+  const v = Math.min(Math.max(isFinite(nuevo) ? nuevo : 0, 0), 100);
+  const otros = cs.filter(c => c.id !== id);
+  const base = otros.reduce((s,c) => s + fotoPct.pct[c.id], 0);
+  const resto = 100 - v;
+  otros.forEach(c => {
+    const p = base > 0 ? fotoPct.pct[c.id]/base*resto : resto/otros.length;
+    c.pct = Math.round(p*100)/100;
+  });
+  cs.find(c => c.id === id).pct = v;
+  // el redondeo a centésimas deja migas: van a la mayor de las otras
+  const miga = Math.round((100 - cs.reduce((s,c) => s + c.pct, 0))*100)/100;
+  if (miga && otros.length){
+    const g = otros.reduce((a,b) => b.pct > a.pct ? b : a);
+    g.pct = Math.round((g.pct + miga)*100)/100;
+  }
+}
+document.addEventListener('focusout', e => {
+  if (!e.target.dataset || !e.target.dataset.pct) return;
+  const id = e.target.dataset.pct;
+  // render() destruye la casilla y la vuelve a enfocar: solo se suelta la foto
+  // si de verdad se ha salido de ella
+  setTimeout(() => { const a = document.activeElement;
+    if (!a || !a.dataset || a.dataset.pct !== id) fotoPct = null; }, 0);
+});
+
 /* ════════════ EVENTOS ════════════ */
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.dataset.pct){ const c=S.config.cats.find(x=>x.id===t.dataset.pct);
-    if(c){ c.pct=dec(t.value)||0; renderPronto(); } return; }
+    if(c){ reajustarPct(c.id, dec(t.value)); renderPronto(); } return; }
   if (t.dataset.mano){ const v=dec(t.value);
     if(isFinite(v)&&v>=0){ S.mano[t.dataset.mano].eur=v; renderPronto(); } return; }
   if (t.dataset.vcoste){ const v=S.mov.find(x=>x.id==t.dataset.vcoste), n=dec(t.value);
